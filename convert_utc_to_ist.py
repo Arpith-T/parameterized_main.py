@@ -9,7 +9,8 @@ def convert_utc_ist(utc):
     hours = 5.30
     hours_added = datetime.timedelta(hours=hours)
     ist_time = utc_time + hours_added
-    print(ist_time)
+    # print(ist_time)
+    return ist_time
 
 
 def main():
