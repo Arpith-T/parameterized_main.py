@@ -5,25 +5,27 @@ import time
 from multiprocessing import Pool
 import random
 import subprocess
-from convert_utc_to_ist import convert_utc_ist
+from influxdb import InfluxDBClient
+from dateutil import parser
+import datetime
 
-# LATENCY = int(os.getenv("LATENCY"))
-# DURATION = int(os.getenv("DURATION"))
-# app_string = os.getenv("CF_Microservice")
-# app_list = app_string.split(',')
-# Chaos_Action = os.getenv("Chaos_Action")
-# PASSWORD = os.getenv("PASSWORD")
-# tenant = os.getenv("TENANT")
+LATENCY = int(os.getenv("LATENCY"))
+DURATION = int(os.getenv("DURATION"))
+app_string = os.getenv("CF_Microservice")
+app_list = app_string.split(',')
+Chaos_Action = os.getenv("Chaos_Action")
+PASSWORD = os.getenv("PASSWORD")
+tenant_name = os.getenv("TENANT")
 # az = os.getenv("AZ")
 
-LATENCY = 1000
-DURATION = 30
-app_list = ["it-km-rest", "it-op-rest"]
-Chaos_Action = "DELAY"
-# Chaos_Action = "KILL"
-# Chaos_Action = "SCALE"
-PASSWORD = "Prisminfra529#5"
-tenant_name = "iat-aws-h"
+# LATENCY = 1000
+# DURATION = 30
+# app_list = ["it-op-odata", "it-runtime-api", "it-op-jobs"]
+# Chaos_Action = "DELAY"
+# # Chaos_Action = "KILL"
+# # Chaos_Action = "SCALE"
+# PASSWORD = "Prisminfra529#5"
+# tenant_name = "mc101"
 
 worker_list = []
 
@@ -67,16 +69,30 @@ def worker_name():
     print(f"The worker selected is - {worker}")
     return worker
 
+if tenant_name == "":
+    print("No Tenant selected for chaos action")
+    app_array = app_list
+    print(app_array)
+else:
+    worker = worker_name()
 
-worker = worker_name()
+    worker_list.append(worker)
 
-worker_list.append(worker)
+    print(worker_list)
 
-print(worker_list)
+    app_array = app_list + worker_list
 
-app_array = app_list + worker_list
+    print(app_array)
 
-print(app_array)
+def convert_utc_ist(utc):
+    # utc = '2022-03-08T07:00:21.971538Z'  # or any date string of differing formats.
+    utc_time = parser.parse(utc)
+    # print(utc_time)
+    hours = 5.30
+    hours_added = datetime.timedelta(hours=hours)
+    ist_time = utc_time + hours_added
+    # print(ist_time)
+    return ist_time
 
 
 def cf_oauth_token():
@@ -316,6 +332,65 @@ def execution_details(guid):
 
     print(json.dumps(result, indent=2))
 
+def execution_details_plus_push_to_influx(app, guid):
+
+    # guid = get_app_guid(token, app)
+
+    url = f"https://chaosmonkey.cf.sap.hana.ondemand.com/api/v1/apps/{guid}/executions"
+
+    payload = {}
+    headers = {
+        'Authorization': 'Basic c2Jzc18rcGJnbmlvdjRpbGQxbGwydmp4dHVlbjl1dm90eXp6a3ZjdW1yenJtdG9jMXZnYmx6OWJlam11eDJtbGs2dXFncXYwPTphYV9EdFdCckRYL2ttdmY4cG5lR2diVHB4RDhHYTg9'
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)[0]
+
+    print(json.dumps(result, indent=2))
+
+    # data = response.json()
+    infra_client = InfluxDBClient('hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap', 8086, 'arpdb')
+
+    infra_client.switch_database('arpdb')
+
+    chaos_action_performed = result["kind"]
+    print(f"\nchaos action performed - {chaos_action_performed}")
+    az_impacted = result["selector"]["azs"][0]
+    print(f"az impacted - {az_impacted}")
+    app_impacted = app
+    instance_impacted = result["apps"][0]["instance"]
+    print(f"instance impacted - {instance_impacted}")
+    start_of_chaos_action = result["start_date"]
+    end_of_chaos_action = result["end_date"]
+    BuildDetail = os.getenv(BuildReport) # This data will come from upstram jenkins job
+    # BuildDetail = "Test_BuildReport"
+    chaos_details = [
+        {
+            "measurement": "InstanceCrashDetails",
+            "tags": {
+                "CFMicroservice": app_impacted,
+                "chaos_action": chaos_action_performed,
+                "az": az_impacted,
+                "IndexValue": instance_impacted,
+                "InstanceStartTime": convert_utc_ist(start_of_chaos_action),
+                "InstanceEndTime": convert_utc_ist(end_of_chaos_action),
+                "BuildDetail": BuildDetail
+            },
+            "fields": {
+                "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+            }
+        }
+    ]
+    print(chaos_details)
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+        pass
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
 def app_state(token, app, guid):
     url = f"https://api.cf.sap.hana.ondemand.com/v3/processes/{guid}/stats"
 
@@ -337,7 +412,6 @@ def app_state(token, app, guid):
             f"Instance - {response.json()['resources'][i]['index']} of {app} is {response.json()['resources'][i]['state']}")
 
 if __name__ == '__main__':
-    app_data = app_array
     t1 = time.time()
 
     if Chaos_Action == "DELAY":
@@ -362,6 +436,7 @@ if __name__ == '__main__':
     token = cf_oauth_token()
     for app in app_array:
         guid = get_app_guid(token, app)
-        execution_details(guid)
+        # execution_details(guid)
+        execution_details_plus_push_to_influx(app,guid)
         app_state(token,app,guid)
 
