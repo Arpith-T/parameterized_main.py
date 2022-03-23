@@ -1,0 +1,27 @@
+{
+  "AWS": {
+    "chaos_url": "https://chaosmonkey.cf.sap.hana.ondemand.com",
+    "chaos_auth": "c2Jzc18rcGJnbmlvdjRpbGQxbGwydmp4dHVlbjl1dm90eXp6a3ZjdW1yenJtdG9jMXZnYmx6OWJlam11eDJtbGs2dXFncXYwPTphYV9EdFdCckRYL2ttdmY4cG5lR2diVHB4RDhHYTg9",
+    "cf_oauth_url": "https://uaa.cf.sap.hana.ondemand.com",
+    "user": "prism@global.corp.sap",
+    "cf_base_url": "https://api.cf.sap.hana.ondemand.com",
+    "space_id": "2c92d3e7-a833-4fbf-89e2-917c07cea220",
+    "trm_url": "https://it-aciat001-trm.cfapps.sap.hana.ondemand.com/api/trm/v1/tenants/",
+    "trm_oauth_url": "https://aciat001.authentication.sap.hana.ondemand.com/oauth/token",
+    "trm_basic_auth": "c2ItaXQhYjc2NDg6ZmIyMGZmYzktMDFjNy00ZTY2LTk2ODAtMjk3YzU3ZWY0ZTYzJEduMEtEeFYtd2Q4NTNTWTNJVXBjeElOSWU3UzhpRjZhZ3Jsdll0aXdhTE09"
+
+  },
+  "AZURE": {
+    "chaos_url": "https://chaosmonkey.cf.eu21.hana.ondemand.com",
+    "chaos_auth": "c2Jzc19sMHNweGZ2ZGVmaGQ4ZDNnNTl0emVieDFrdGZraWNhM3Fkc2pxaWVuYmNteDJtdmpscmllc2Vrb3RjaGY4aHZ3bXp3PTphYV9UQTdMRFgvdjU1a3pLZElSUW1KTjh6bzRXaEU9",
+    "cf_oauth_url": "https://uaa.cf.eu21.hana.ondemand.com",
+    "user": "prism@global.corp.sap",
+    "cf_base_url": "https://api.cf.eu21.hana.ondemand.com",
+    "space_id": "ab1eef62-e8f3-4590-8a0b-eb3a932f4b47",
+    "trm_url": "https://it-ziat003-trm.cfapps.eu21.hana.ondemand.com/api/trm/v1/tenants/",
+    "trm_oauth_url": "https://ziat003.authentication.eu21.hana.ondemand.com/oauth/token",
+    "trm_basic_auth": ""
+  }
+}
+
+
