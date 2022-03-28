@@ -8,6 +8,7 @@ import subprocess
 from influxdb import InfluxDBClient
 from dateutil import parser
 from datetime import datetime, timedelta
+from itertools import repeat
 
 # LATENCY = int(os.getenv("LATENCY"))
 # DURATION = int(os.getenv("DURATION"))
@@ -22,25 +23,32 @@ from datetime import datetime, timedelta
 # BuildDetail = os.getenv("BuildReport")
 # WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
-LATENCY = 1000
-DURATION = 60
+LATENCY = 5000
+DURATION = 900
+LOSS_PERCENTAGE = 100
+recurring_every = 5
+sleep_time = 180  # RTO of an instance
 app_list = ["it-op-odata", "it-op-jobs", "it-op-rest"]
-Chaos_Action = "DELAY"
+# Chaos_Action = "LOSS"
+# Chaos_Action = "DELAY"
+Chaos_Action = "RECURRING_KILL"
 # Chaos_Action = "KILL"
 # Chaos_Action = "SCALE"
 PASSWORD = "Prisminfra529#5"
-tenant_name = "mc103"
+tenant_name = "mazprismeu21-03"
 BuildDetail = "Test_BuildReport"
-IAAS = "AWS"
-Performed_By = "test123"
-# az = os.getenv("AZ")
+IAAS = "AZURE"
+Performed_By = "ARPITH"
 worker_list = []
-
+uuid_list = []
+list_of_executions = []
+list_of_guids = []
 
 def read_config():
     with open('config.json') as f:
         conf = json.load(f)
     return conf
+
 
 config = read_config()
 
@@ -55,9 +63,7 @@ trm_oauth_url = json.dumps(config[IAAS]['trm_oauth_url']).strip('\"')
 trm_basic_auth = json.dumps(config[IAAS]['trm_basic_auth']).strip('\"')
 
 
-
-
-def aciat001_trm_token():
+def trm_token():
     url = f"{trm_oauth_url}?grant_type=client_credentials"
 
     payload = {}
@@ -76,7 +82,7 @@ def aciat001_trm_token():
 
 
 def worker_name():
-    trm_token = aciat001_trm_token()
+    trm_tokenid = trm_token()
 
     # tenant_name = "mc101"
 
@@ -85,7 +91,7 @@ def worker_name():
 
     payload = {}
     headers = {
-        'Authorization': f'Bearer {trm_token}'
+        'Authorization': f'Bearer {trm_tokenid}'
         # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=hXwfyso6e1%2FiD%2BzG%2FmTvccGsC%2F0%2F2O89fpaXQYYhBOU%3D'
     }
 
@@ -156,6 +162,7 @@ def cf_oauth_token():
 
     return access_token
 
+token = cf_oauth_token()
 
 def get_app_guid(token, app):
     url = f"{cf_base_url}/v3/apps?page=1&per_page=1000&space_guids={space_id}&names={app}"
@@ -171,6 +178,127 @@ def get_app_guid(token, app):
     guid = json.loads(response.text)["resources"][0]["guid"]
 
     return guid
+
+# guid = get_app_guid()
+
+def mapping(guid, app):
+    url = f"{chaos_url}/api/v1/apps/{guid}/mapping"
+
+    payload = {}
+    headers = {
+        'Authorization': f'Basic {chaos_auth}'
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload)
+
+    print(f"\nfor '{app}'\n{response.json()}")
+
+
+def execution_len(guid):
+    url = f"{chaos_url}/api/v1/apps/{guid}/executions"
+
+    payload = {}
+    headers = {
+        'Authorization': f'Basic {chaos_auth}'
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload).json()
+    executions = ((len(response)))
+    # print(f"Already existing executions are -{executions}")
+
+    return executions
+
+
+def execution_data(guid, app):
+    url = f"{chaos_url}/api/v1/apps/{guid}/executions"
+
+    payload = {}
+    headers = {
+        'Authorization': f'Basic {chaos_auth}'
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload)
+
+    # print(response.json()[0])  # prints the latest execution
+
+    executions = response.json()[0]
+
+    executions["MTMS"] = app
+
+    print(f"\nfor {app} - \n{executions}")
+
+    infra_client = InfluxDBClient('hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap', 8086, 'arpdb')
+
+    infra_client.switch_database('arpdb')
+    chaos_details = [
+        {
+            "measurement": "MultiMTMS_Recurring_kill",
+            "tags": {
+                "CFMicroservice": executions["MTMS"],
+                "chaos_action": executions["kind"],
+                "az": executions["selector"]["azs"][0],
+                "IndexValue": executions["apps"][0]["instance"],
+                "Execution_status": executions["apps"][0]["status"],
+                "InstanceStartTime": executions["start_date"],
+                "BuildDetail": BuildDetail,
+                "IAAS": IAAS,
+                "Performed_By": Performed_By
+
+            },
+            "fields": {
+                "execution_data": str(executions),
+                "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+            }
+        }
+    ]
+    print(chaos_details)
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+        pass
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
+    # print(f"\n{executions}")
+    #
+    # try:
+    #     print(f"no - of executions for '{app} -'{len(executions)}'")
+    # except: pass
+    #
+    # return executions
+
+    # execution_status = response.json()[0]["apps"][0]["status"]
+
+    # print(execution_status)
+
+    # if execution_status == "FAILED":
+    #     print(f"No instance of {app} exists in {ZONE}")
+    #     print(f"The current mapping of instances are as below:\n{mapping()}")
+    #     return execution_status
+    # else:
+    #     time.sleep(360)
+    #     return execution_status
+
+
+def delete_task(uuid, app):
+    url = f"{chaos_url}/api/v1/tasks/{uuid}"
+
+    payload = {}
+    headers = {
+        'Authorization': f'Basic {chaos_auth}'
+    }
+
+    response = requests.request("DELETE", url, headers=headers, data=payload)
+
+    print(response.status_code)
+
+    if response.status_code == 200:
+        print(f"\ntask - {uuid} for {app} deleted successfully")
+    else:
+        print(f"\nplease check the task {uuid} for {app}- in the dashboard and cleanup")
+
+    return response.status_code
 
 
 def get_zone():
@@ -283,94 +411,6 @@ def get_zone():
         return zone_to_be_used
 
 
-def crash(CF_Microservice):
-    url = f"{chaos_url}/api/v1/tasks"
-
-    payload = json.dumps({
-        "app_name": CF_Microservice,
-        "selector": {
-            "percentage": 50,
-            "azs": [
-                get_zone()
-            ]
-        },
-        "kind": "KILL",
-        "repeatability": "ONCE"
-    })
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f"Basic {chaos_auth}"
-    }
-
-    response = requests.request("POST", url, headers=headers, data=payload)
-
-    result = json.loads(response.text)
-
-    print(json.dumps(result, indent=4))
-
-
-def app_scaling(CF_Microservice):
-    no_of_apps = len(app_list)
-    print(f"you have selected {no_of_apps} apps to scale down.They are - {app_list}")
-
-    subprocess.run(
-        f'cf login -a https://api.cf.sap.hana.ondemand.com -o "CPI-Global-Canary_aciat001"  -s prov_eu10_aciat001 -u prism@global.corp.sap -p {PASSWORD}')
-
-    for CF_Microservice in app_list:
-        if CF_Microservice == "it-km-rest":
-            print("\n")
-            subprocess.run(f'cf us {CF_Microservice} it-scale-km')
-            time.sleep(5)
-            subprocess.run(f'cf scale {CF_Microservice} -i 2')
-            print(f"scale down of {CF_Microservice} is done")
-        elif CF_Microservice == "it-runtime-api":
-            print("\n")
-            subprocess.run(f'cf us {CF_Microservice} it-scale-runtime-api')
-            time.sleep(5)
-            subprocess.run(f'cf scale {CF_Microservice} -i 2')
-            print(f"scale down of {CF_Microservice} is done")
-        else:
-            subprocess.run(f'cf scale {CF_Microservice} -i 2')
-            print(f"scale down of {CF_Microservice} is done")
-
-    time.sleep(DURATION)
-
-    for CF_Microservice in app_list:
-        subprocess.run(f'cf scale {CF_Microservice} -i 3')
-        print(f"scale up of {CF_Microservice} is done")
-
-
-def delay(CF_Microservice):
-    url = f"{chaos_url}/api/v1/tasks"
-
-    payload = json.dumps({
-        "app_name": CF_Microservice,
-        "selector": {
-            "percentage": 50,
-
-            "azs": [
-                get_zone()
-            ]
-        },
-        "kind": "DELAY",
-        "config": {
-            "latency": LATENCY
-        },
-        "repeatability": "ONCE",
-        "duration": DURATION
-    })
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f"Basic {chaos_auth}"
-    }
-
-    response = requests.request("POST", url, headers=headers, data=payload)
-
-    result = json.loads(response.text)
-
-    print(json.dumps(result, indent=4))
-
-
 def execution_details(guid):
     url = f"{chaos_url}/api/v1/apps/{guid}/executions"
 
@@ -470,23 +510,218 @@ def app_state(token, app, guid):
             f"Instance - {response.json()['resources'][i]['index']} of {app} is {response.json()['resources'][i]['state']}")
 
 
+def crash(CF_Microservice, ZONE):
+    url = f"{chaos_url}/api/v1/tasks"
+
+    payload = json.dumps({
+        "app_name": CF_Microservice,
+        "selector": {
+            "percentage": 50,
+            "azs": [
+                ZONE
+            ]
+        },
+        "kind": "KILL",
+        "repeatability": "ONCE"
+    })
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Basic {chaos_auth}"
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)
+
+    print(json.dumps(result, indent=4))
+
+
+def app_scaling(CF_Microservice):
+    no_of_apps = len(app_list)
+    print(f"you have selected {no_of_apps} apps to scale down.They are - {app_list}")
+
+    subprocess.run(
+        f'cf login -a https://api.cf.sap.hana.ondemand.com -o "CPI-Global-Canary_aciat001"  -s prov_eu10_aciat001 -u prism@global.corp.sap -p {PASSWORD}')
+
+    for CF_Microservice in app_list:
+        if CF_Microservice == "it-km-rest":
+            print("\n")
+            subprocess.run(f'cf us {CF_Microservice} it-scale-km')
+            time.sleep(5)
+            subprocess.run(f'cf scale {CF_Microservice} -i 2')
+            print(f"scale down of {CF_Microservice} is done")
+        elif CF_Microservice == "it-runtime-api":
+            print("\n")
+            subprocess.run(f'cf us {CF_Microservice} it-scale-runtime-api')
+            time.sleep(5)
+            subprocess.run(f'cf scale {CF_Microservice} -i 2')
+            print(f"scale down of {CF_Microservice} is done")
+        else:
+            subprocess.run(f'cf scale {CF_Microservice} -i 2')
+            print(f"scale down of {CF_Microservice} is done")
+
+    time.sleep(DURATION)
+
+    for CF_Microservice in app_list:
+        subprocess.run(f'cf scale {CF_Microservice} -i 3')
+        print(f"scale up of {CF_Microservice} is done")
+
+
+def delay(CF_Microservice, ZONE):
+    url = f"{chaos_url}/api/v1/tasks"
+
+    payload = json.dumps({
+        "app_name": CF_Microservice,
+        "selector": {
+            "percentage": 50,
+
+            "azs": [
+                ZONE
+            ]
+        },
+        "kind": "DELAY",
+        "config": {
+            "latency": LATENCY
+        },
+        "repeatability": "ONCE",
+        "duration": DURATION
+    })
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Basic {chaos_auth}"
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)
+
+    print(json.dumps(result, indent=4))
+
+    guid = get_app_guid(token, CF_Microservice)
+
+    print(f"The guid for '{CF_Microservice}' is '{guid}'")
+
+    time.sleep(DURATION + 90)
+
+    execution_details_plus_push_to_influx(CF_Microservice, guid)
+    app_state(token, CF_Microservice, guid)
+
+
+
+def loss(CF_Microservice, ZONE):
+    url = f"{chaos_url}/api/v1/tasks"
+
+    payload = json.dumps({
+        "app_name": CF_Microservice,
+        "selector": {
+            "percentage": 50,
+
+            "azs": [
+                ZONE
+            ]
+        },
+        "kind": "LOSS",
+        "config": {
+            "percentage_loss": LOSS_PERCENTAGE
+        },
+        "repeatability": "ONCE",
+        "duration": DURATION
+    })
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Basic {chaos_auth}"
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)
+
+    print(json.dumps(result, indent=4))
+
+def recurring_kill(CF_Microservice, guid, ZONE):
+    # guid = get_app_guid(token, app)
+    # mapping(guid, app)
+    no_of_execution = (execution_len(guid))
+    expected_executions = no_of_execution + 1
+
+
+
+    utc_time = datetime.utcnow()
+    print(f"the utc time now is - {utc_time}")
+    url = f"{chaos_url}/api/v1/tasks"
+
+    payload = json.dumps({
+        "app_name": CF_Microservice,
+        "selector": {
+            "percentage": 50,
+            "azs": [
+                ZONE
+            ]
+        },
+        "cron": f"*/{recurring_every} * * * *",
+        "kind": "KILL",
+        "repeatability": "RECURRING"
+    })
+    headers = {
+        'Authorization': f'Basic {chaos_auth}',
+        'Content-Type': 'application/json'
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)
+
+    print(json.dumps(result, indent=4))
+
+    uuid = response.json()["uuid"]
+
+    print(uuid)
+
+    uuid_list.append(uuid)
+
+    while no_of_execution != expected_executions:
+        # print("No other executions found")
+        no_of_execution = execution_len(guid)
+        time.sleep(5)
+
+    start_time = time.time()
+
+    while time.time() < (start_time + DURATION):
+        execution_data(guid, CF_Microservice)
+        print("App state - IMMEDIATELY post execution -")
+        app_state(token, CF_Microservice, guid)
+        time.sleep(sleep_time)
+        print(f"App state {sleep_time}sec post execution -")
+        app_state(token, CF_Microservice, guid)
+        time.sleep(((recurring_every * 60) + 2) - sleep_time)
+        mapping(guid, CF_Microservice)
+
+
+
+    delete_task(uuid, CF_Microservice)
+
+    print("The final mapping of all the instances are are below - \n")
+    mapping(guid, CF_Microservice)
+
+
 if __name__ == '__main__':
 
     config = read_config()
 
     # time.sleep(60)
     # time.sleep(WAIT_TIME)
+    ZONE = get_zone()
 
     t1 = time.time()
 
     if Chaos_Action == "DELAY":
         p = Pool()
-        result = p.map(delay, app_array)
+        result = p.starmap(delay, zip(app_array, repeat(ZONE)))
         p.close()
         p.join()
     elif Chaos_Action == "KILL":
         p = Pool()
-        result = p.map(crash, app_array)
+        result = p.starmap(crash, zip(app_array, repeat(ZONE)))
         p.close()
         p.join()
     elif Chaos_Action == "SCALE":
@@ -495,13 +730,45 @@ if __name__ == '__main__':
         p.close()
         p.join()
 
-    print("\n")
-    print(f"this took: {time.time() - t1} ")
-    time.sleep(DURATION + 90)
-    # time.sleep(DURATION)
-    token = cf_oauth_token()
-    for app in app_array:
-        guid = get_app_guid(token, app)
-        # execution_details(guid)
-        execution_details_plus_push_to_influx(app, guid)
-        app_state(token, app, guid)
+    elif Chaos_Action == "LOSS":
+        p = Pool()
+        result = p.starmap(loss, zip(app_array, repeat(ZONE)))
+        p.close()
+        p.join()
+
+    elif Chaos_Action == "RECURRING_KILL":
+        p1 = Pool()
+        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                 app_array))  # https://stackoverflow.com/questions/5442910/how-to-use-multiprocessing-pool-map-with-multiple-arguments
+        print(guid_list)
+        p1.close()
+        p1.join()
+
+        p2 = Pool()
+        mapping_pool = p2.starmap(mapping, zip(guid_list, app_array))
+        p2.close()
+        p2.join()
+
+        p3 = Pool()
+        app_state_pool = p3.starmap(app_state, zip(repeat(token), app_array, guid_list))
+        p3.close()
+        p3.join()
+
+        ZONE = get_zone()
+
+        p4 = Pool()
+        result = p4.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
+        p4.close()
+        p4.join()
+
+
+    # print("\n")
+    # print(f"this took: {time.time() - t1} ")
+    # time.sleep(DURATION + 90)
+    # # time.sleep(DURATION)
+    # token = cf_oauth_token()
+    # for app in app_array:
+    #     guid = get_app_guid(token, app)
+    #     # execution_details(guid)
+    #     execution_details_plus_push_to_influx(app, guid)
+    #     app_state(token, app, guid)
