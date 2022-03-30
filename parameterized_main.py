@@ -24,20 +24,21 @@ from itertools import repeat
 # WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
 LATENCY = 5000
-DURATION = 900
+DURATION = 1800
 LOSS_PERCENTAGE = 100
 recurring_every = 5
 sleep_time = 180  # RTO of an instance
-app_list = ["it-op-odata", "it-op-jobs", "it-op-rest"]
+app_list = ["it-trm", "it-gb", "it-co"]
 # Chaos_Action = "LOSS"
 # Chaos_Action = "DELAY"
 Chaos_Action = "RECURRING_KILL"
 # Chaos_Action = "KILL"
 # Chaos_Action = "SCALE"
 PASSWORD = "Prisminfra529#5"
-tenant_name = "mazprismeu21-03"
+tenant_name = "iat-aws-h"
+# tenant_name = " "
 BuildDetail = "Test_BuildReport"
-IAAS = "AZURE"
+IAAS = "AWS"
 Performed_By = "ARPITH"
 worker_list = []
 uuid_list = []
@@ -105,39 +106,10 @@ def worker_name():
     return worker
 
 
-if tenant_name == "":
-    print("No Tenant selected for chaos action")
-    app_array = app_list  # when no worker is selected, only MTMS should be executed
-    print(app_array)
-else:
-    try:
-        worker = worker_name()
-
-        worker_list.append(worker)
-
-        print(worker_list)
-
-        app_array = app_list + worker_list
-
-        print(app_array)
-    except:
-        print("No worker selected")
-        pass
-try:
-    app_array = app_list + worker_list
-except:
-    app_array = worker_list  # when there are no MTMS entered only worker list needs to be taken and executed
 
 
-# def convert_utc_ist(utc):
-#     # utc = '2022-03-08T07:00:21.971538Z'  # or any date string of differing formats.
-#     utc_time = parser.parse(utc)
-#     # print(utc_time)
-#     hours = 5.30
-#     hours_added = datetime.timedelta(hours=hours)
-#     ist_time = utc_time + hours_added
-#     # print(ist_time)
-#     return ist_time
+
+
 
 def utc_to_ist(utc):
     timestamp = datetime.strptime(utc, '%Y-%m-%dT%H:%M:%S')
@@ -194,6 +166,31 @@ def mapping(guid, app):
     print(f"\nfor '{app}'\n{response.json()}")
 
 
+
+def instance_state(token, app, guid, instance_impacted):
+    global instance_status
+    url = f"{cf_base_url}/v3/processes/{guid}/stats"
+
+    payload = {}
+    headers = {
+        'Authorization': f'Bearer {token}'
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload)
+
+    # print(response.json())
+    try:
+        number_of_instances = len(response.json()["resources"])
+        print(f"Number of instances in '{app}' is  - '{number_of_instances}'")
+    except:
+        pass
+    try:
+        instance_status = response.json()['resources'][instance_impacted]['state']
+    except: pass
+
+    return instance_status
+
+
 def execution_len(guid):
     url = f"{chaos_url}/api/v1/apps/{guid}/executions"
 
@@ -227,38 +224,91 @@ def execution_data(guid, app):
 
     print(f"\nfor {app} - \n{executions}")
 
-    infra_client = InfluxDBClient('hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap', 8086, 'arpdb')
+    execution_status = executions["apps"][0]["status"]
 
-    infra_client.switch_database('arpdb')
-    chaos_details = [
-        {
-            "measurement": "MultiMTMS_Recurring_kill",
-            "tags": {
-                "CFMicroservice": executions["MTMS"],
-                "chaos_action": executions["kind"],
-                "az": executions["selector"]["azs"][0],
-                "IndexValue": executions["apps"][0]["instance"],
-                "Execution_status": executions["apps"][0]["status"],
-                "InstanceStartTime": executions["start_date"],
-                "BuildDetail": BuildDetail,
-                "IAAS": IAAS,
-                "Performed_By": Performed_By
+    instance_impacted = executions["apps"][0]["instance"]
+    instance_state(token, app, guid, instance_impacted)
 
-            },
-            "fields": {
-                "execution_data": str(executions),
-                "chaos": 1  # we will need to figure out as to what we need to add here and use it better
-            }
-        }
-    ]
-    print(chaos_details)
+    if execution_status == "FINISHED" or execution_status == "RUNNING":
+        t1 = time.time()
 
-    if infra_client.write_points(chaos_details, protocol='json'):
-        print("Chaos Data Insertion success")
-        pass
+        while instance_state(token, app, guid, instance_impacted) != "RUNNING":
+
+            infra_client = InfluxDBClient('hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap', 8086, 'arpdb')
+
+            infra_client.switch_database('arpdb')
+            chaos_details = [
+                {
+                    "measurement": "MultiMTMS_Recurring_kill",
+                    "tags": {
+                        "CFMicroservice": executions["MTMS"],
+                        "chaos_action": executions["kind"],
+                        "az": executions["selector"]["azs"][0],
+                        "IndexValue": executions["apps"][0]["instance"],
+                        "Execution_status": executions["apps"][0]["status"],
+                        "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                        "BuildDetail": BuildDetail,
+                        "IAAS": IAAS,
+                        "Performed_By": Performed_By
+
+                    },
+                    "fields": {
+                        "execution_data": str(executions),
+                        "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                    }
+                }
+            ]
+            # print(chaos_details)
+
+            if infra_client.write_points(chaos_details, protocol='json'):
+                print("Chaos Data Insertion success")
+                pass
+            else:
+                print("Chaos Data Insertion Failed")
+                print(chaos_details)
+
+        print("Instance is RUNNING")
+
+        t2 = time.time()
+        RTO = t2 - t1
+        print(f"RTO time - {RTO}")
     else:
-        print("Chaos Data Insertion Failed")
-        print(chaos_details)
+        print("Execution failed")
+        infra_client = InfluxDBClient('hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap', 8086, 'arpdb')
+
+        infra_client.switch_database('arpdb')
+        chaos_details = [
+            {
+                "measurement": "MultiMTMS_Recurring_kill",
+                "tags": {
+                    "CFMicroservice": executions["MTMS"],
+                    "chaos_action": executions["kind"],
+                    "az": executions["selector"]["azs"][0],
+                    "IndexValue": executions["apps"][0]["instance"],
+                    "Execution_status": executions["apps"][0]["status"],
+                    "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                    "BuildDetail": BuildDetail,
+                    "IAAS": IAAS,
+                    "Performed_By": Performed_By
+
+                },
+                "fields": {
+                    "execution_data": str(executions),
+                    "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                }
+            }
+        ]
+        # print(chaos_details)
+
+        if infra_client.write_points(chaos_details, protocol='json'):
+            print("Chaos Data Insertion success")
+            pass
+        else:
+            print("Chaos Data Insertion Failed")
+            print(chaos_details)
+
+    print("Instance is RUNNING")
+
 
     # print(f"\n{executions}")
     #
@@ -279,6 +329,9 @@ def execution_data(guid, app):
     # else:
     #     time.sleep(360)
     #     return execution_status
+
+
+
 
 
 def delete_task(uuid, app):
@@ -510,6 +563,8 @@ def app_state(token, app, guid):
             f"Instance - {response.json()['resources'][i]['index']} of {app} is {response.json()['resources'][i]['state']}")
 
 
+
+
 def crash(CF_Microservice, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
@@ -607,7 +662,6 @@ def delay(CF_Microservice, ZONE):
     app_state(token, CF_Microservice, guid)
 
 
-
 def loss(CF_Microservice, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
@@ -638,6 +692,16 @@ def loss(CF_Microservice, ZONE):
 
     print(json.dumps(result, indent=4))
 
+    guid = get_app_guid(token, CF_Microservice)
+
+    print(f"The guid for '{CF_Microservice}' is '{guid}'")
+
+    time.sleep(DURATION + 90)
+
+    execution_details_plus_push_to_influx(CF_Microservice, guid)
+    app_state(token, CF_Microservice, guid)
+
+
 def recurring_kill(CF_Microservice, guid, ZONE):
     # guid = get_app_guid(token, app)
     # mapping(guid, app)
@@ -646,8 +710,8 @@ def recurring_kill(CF_Microservice, guid, ZONE):
 
 
 
-    utc_time = datetime.utcnow()
-    print(f"the utc time now is - {utc_time}")
+    # utc_time = datetime.utcnow()
+    # print(f"the utc time now is - {utc_time}")
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
@@ -687,13 +751,17 @@ def recurring_kill(CF_Microservice, guid, ZONE):
     start_time = time.time()
 
     while time.time() < (start_time + DURATION):
+        begin_time = time.time()
         execution_data(guid, CF_Microservice)
-        print("App state - IMMEDIATELY post execution -")
-        app_state(token, CF_Microservice, guid)
-        time.sleep(sleep_time)
-        print(f"App state {sleep_time}sec post execution -")
-        app_state(token, CF_Microservice, guid)
-        time.sleep(((recurring_every * 60) + 2) - sleep_time)
+        end_time = time.time()
+        total_exec_time = end_time - begin_time
+        print(f"Total Execution time is - {total_exec_time}")
+        # print("App state - IMMEDIATELY post execution -")
+        # app_state(token, CF_Microservice, guid)
+        # time.sleep(sleep_time)
+        # print(f"App state {sleep_time}sec post execution -")
+        # app_state(token, CF_Microservice, guid)
+        time.sleep(((recurring_every * 60) + 2) - total_exec_time)
         mapping(guid, CF_Microservice)
 
 
@@ -707,6 +775,29 @@ def recurring_kill(CF_Microservice, guid, ZONE):
 if __name__ == '__main__':
 
     config = read_config()
+
+    if tenant_name == "":
+        print("No Tenant selected for chaos action")
+        app_array = app_list  # when no worker is selected, only MTMS should be executed
+        print(app_array)
+    else:
+        try:
+            worker = worker_name()
+
+            worker_list.append(worker)
+
+            print(worker_list)
+
+            app_array = app_list + worker_list
+
+            print(app_array)
+        except:
+            print("No worker selected")
+            pass
+    try:
+        app_array = app_list + worker_list
+    except:
+        app_array = worker_list  # when there are no MTMS entered only worker list needs to be taken and executed
 
     # time.sleep(60)
     # time.sleep(WAIT_TIME)
