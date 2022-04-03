@@ -10,12 +10,16 @@ from dateutil import parser
 from datetime import datetime, timedelta
 from itertools import repeat
 
+# IAAS = os.getenv("IAAS")
 # LATENCY = int(os.getenv("LATENCY"))
+# LOSS_PERCENTAGE = int(os.getenv("LOSS_PERCENTAGE"))
 # DURATION = int(os.getenv("DURATION"))
+# recurring_every = int(os.getenv("recurring_every"))
 # app_string = os.getenv("CF_Microservice")
 # try:
 #     app_list = app_string.split(',')
-# except: pass
+# except:
+#     pass
 #
 # Chaos_Action = os.getenv("Chaos_Action")
 # PASSWORD = os.getenv("PASSWORD")
@@ -24,26 +28,46 @@ from itertools import repeat
 # WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
 LATENCY = 5000
-DURATION = 1800
+DURATION = 300
 LOSS_PERCENTAGE = 100
 recurring_every = 5
-sleep_time = 180  # RTO of an instance
-app_list = ["it-trm", "it-gb", "it-co"]
+app_list = ["it-op-rest", "it-op-consumer", "it-app-prov"]
 # Chaos_Action = "LOSS"
-# Chaos_Action = "DELAY"
-Chaos_Action = "RECURRING_KILL"
+Chaos_Action = "DELAY"
+# Chaos_Action = "RECURRING_KILL"
 # Chaos_Action = "KILL"
 # Chaos_Action = "SCALE"
 PASSWORD = "Prisminfra529#5"
-tenant_name = "iat-aws-h"
-# tenant_name = " "
+# tenant_name = "awsiatmaz"
+tenant_name = " "
 BuildDetail = "Test_BuildReport"
-IAAS = "AWS"
+IAAS = "AZURE"
 Performed_By = "ARPITH"
+WAIT_TIME = 0
+
+
 worker_list = []
 uuid_list = []
 list_of_executions = []
 list_of_guids = []
+
+### multiprocessing with all the cores #####
+# Refer - https://stackoverflow.com/questions/19086106/how-to-utilize-all-cores-with-python-multiprocessing
+def init_worker(mps, fps, cut):
+    global memorizedPaths, filepaths, cutoff
+    global DG
+
+    print("process initializing", mp.current_process())
+    memorizedPaths, filepaths, cutoff = mps, fps, cut
+    DG = 1##nx.read_gml("KeggComplete.gml", relabel = True)
+
+def work(item):
+    _all_simple_paths_graph(DG, cutoff, item, memorizedPaths, filepaths)
+
+def _all_simple_paths_graph(DG, cutoff, item, memorizedPaths, filepaths):
+    pass # print "doing " + str(item)
+
+################################
 
 def read_config():
     with open('config.json') as f:
@@ -62,6 +86,8 @@ space_id = json.dumps(config[IAAS]['space_id']).strip('\"')
 trm_url = json.dumps(config[IAAS]['trm_url']).strip('\"')
 trm_oauth_url = json.dumps(config[IAAS]['trm_oauth_url']).strip('\"')
 trm_basic_auth = json.dumps(config[IAAS]['trm_basic_auth']).strip('\"')
+influx_db = json.dumps(config[IAAS]['influx_db']).strip('\"')
+db_store = json.dumps(config[IAAS]['db_store']).strip('\"')
 
 
 def trm_token():
@@ -106,11 +132,6 @@ def worker_name():
     return worker
 
 
-
-
-
-
-
 def utc_to_ist(utc):
     timestamp = datetime.strptime(utc, '%Y-%m-%dT%H:%M:%S')
     # print(utc)
@@ -134,7 +155,9 @@ def cf_oauth_token():
 
     return access_token
 
+
 token = cf_oauth_token()
+
 
 def get_app_guid(token, app):
     url = f"{cf_base_url}/v3/apps?page=1&per_page=1000&space_guids={space_id}&names={app}"
@@ -151,6 +174,7 @@ def get_app_guid(token, app):
 
     return guid
 
+
 # guid = get_app_guid()
 
 def mapping(guid, app):
@@ -164,7 +188,6 @@ def mapping(guid, app):
     response = requests.request("GET", url, headers=headers, data=payload)
 
     print(f"\nfor '{app}'\n{response.json()}")
-
 
 
 def instance_state(token, app, guid, instance_impacted):
@@ -186,7 +209,8 @@ def instance_state(token, app, guid, instance_impacted):
         pass
     try:
         instance_status = response.json()['resources'][instance_impacted]['state']
-    except: pass
+    except:
+        pass
 
     return instance_status
 
@@ -234,9 +258,9 @@ def execution_data(guid, app):
 
         while instance_state(token, app, guid, instance_impacted) != "RUNNING":
 
-            infra_client = InfluxDBClient('hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap', 8086, 'arpdb')
+            infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
-            infra_client.switch_database('arpdb')
+            infra_client.switch_database(f'{db_store}')
             chaos_details = [
                 {
                     "measurement": "MultiMTMS_Recurring_kill",
@@ -249,11 +273,11 @@ def execution_data(guid, app):
                         "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                         "BuildDetail": BuildDetail,
                         "IAAS": IAAS,
-                        "Performed_By": Performed_By
+                        # "Performed_By": Performed_By
 
                     },
                     "fields": {
-                        "execution_data": str(executions),
+                        # "execution_data": str(executions),
                         "chaos": 1  # we will need to figure out as to what we need to add here and use it better
                     }
                 }
@@ -268,15 +292,50 @@ def execution_data(guid, app):
                 print(chaos_details)
 
         print("Instance is RUNNING")
+        finish_time = time.localtime()
+        converted_finish_time = time.strftime("%H:%M:%S", finish_time)
+        print(f"The uptime is {converted_finish_time}")
+        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+        infra_client.switch_database(f'{db_store}')
+        chaos_details = [
+            {
+                "measurement": "MultiMTMS_Recurring_kill",
+                "tags": {
+                    "CFMicroservice": executions["MTMS"],
+                    "chaos_action": executions["kind"],
+                    "az": executions["selector"]["azs"][0],
+                    "IndexValue": executions["apps"][0]["instance"],
+                    "Execution_status": executions["apps"][0]["status"],
+                    "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                    "EndTime": converted_finish_time,
+                    "BuildDetail": BuildDetail,
+                    "IAAS": IAAS,
+                    # "Performed_By": Performed_By
+
+                },
+                "fields": {
+                    "execution_data": str(executions),
+                    "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                }
+            }
+        ]
+
+        if infra_client.write_points(chaos_details, protocol='json'):
+            print("Chaos Data Insertion success")
+            pass
+        else:
+            print("Chaos Data Insertion Failed")
+            print(chaos_details)
 
         t2 = time.time()
         RTO = t2 - t1
         print(f"RTO time - {RTO}")
     else:
         print("Execution failed")
-        infra_client = InfluxDBClient('hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap', 8086, 'arpdb')
+        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
-        infra_client.switch_database('arpdb')
+        infra_client.switch_database(f'{db_store}')
         chaos_details = [
             {
                 "measurement": "MultiMTMS_Recurring_kill",
@@ -289,7 +348,7 @@ def execution_data(guid, app):
                     "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                     "BuildDetail": BuildDetail,
                     "IAAS": IAAS,
-                    "Performed_By": Performed_By
+                    # "Performed_By": Performed_By
 
                 },
                 "fields": {
@@ -308,7 +367,6 @@ def execution_data(guid, app):
             print(chaos_details)
 
     print("Instance is RUNNING")
-
 
     # print(f"\n{executions}")
     #
@@ -329,9 +387,6 @@ def execution_data(guid, app):
     # else:
     #     time.sleep(360)
     #     return execution_status
-
-
-
 
 
 def delete_task(uuid, app):
@@ -479,7 +534,7 @@ def execution_details(guid):
     print(json.dumps(result, indent=2))
 
 
-def execution_details_plus_push_to_influx(app, guid):
+def execution_details_plus_push_to_influx(app, guid, chaos_field):
     # guid = get_app_guid(token, app)
 
     url = f"{chaos_url}/api/v1/apps/{guid}/executions"
@@ -496,9 +551,9 @@ def execution_details_plus_push_to_influx(app, guid):
     print(json.dumps(result, indent=2))
 
     # data = response.json()
-    infra_client = InfluxDBClient('hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap', 8086, 'arpdb')
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
-    infra_client.switch_database('arpdb')
+    infra_client.switch_database(f'{db_store}')
 
     chaos_action_performed = result["kind"]
     print(f"\nchaos action performed - {chaos_action_performed}")
@@ -522,11 +577,11 @@ def execution_details_plus_push_to_influx(app, guid):
                 "InstanceEndTime": utc_to_ist(end_of_chaos_action),
                 "BuildDetail": BuildDetail,
                 "IAAS": IAAS,
-                "Performed_By": Performed_By
+                # "Performed_By": Performed_By
 
             },
             "fields": {
-                "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                "chaos": chaos_field  # we will need to figure out as to what we need to add here and use it better
             }
         }
     ]
@@ -561,8 +616,6 @@ def app_state(token, app, guid):
     for i in range(0, number_of_instances):
         print(
             f"Instance - {response.json()['resources'][i]['index']} of {app} is {response.json()['resources'][i]['state']}")
-
-
 
 
 def crash(CF_Microservice, ZONE):
@@ -658,7 +711,7 @@ def delay(CF_Microservice, ZONE):
 
     time.sleep(DURATION + 90)
 
-    execution_details_plus_push_to_influx(CF_Microservice, guid)
+    execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
     app_state(token, CF_Microservice, guid)
 
 
@@ -698,7 +751,7 @@ def loss(CF_Microservice, ZONE):
 
     time.sleep(DURATION + 90)
 
-    execution_details_plus_push_to_influx(CF_Microservice, guid)
+    execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
     app_state(token, CF_Microservice, guid)
 
 
@@ -707,8 +760,6 @@ def recurring_kill(CF_Microservice, guid, ZONE):
     # mapping(guid, app)
     no_of_execution = (execution_len(guid))
     expected_executions = no_of_execution + 1
-
-
 
     # utc_time = datetime.utcnow()
     # print(f"the utc time now is - {utc_time}")
@@ -762,9 +813,7 @@ def recurring_kill(CF_Microservice, guid, ZONE):
         # print(f"App state {sleep_time}sec post execution -")
         # app_state(token, CF_Microservice, guid)
         time.sleep(((recurring_every * 60) + 2) - total_exec_time)
-        mapping(guid, CF_Microservice)
-
-
+        # mapping(guid, CF_Microservice)
 
     delete_task(uuid, CF_Microservice)
 
@@ -806,26 +855,41 @@ if __name__ == '__main__':
     t1 = time.time()
 
     if Chaos_Action == "DELAY":
+        time.sleep(WAIT_TIME)
         p = Pool()
         result = p.starmap(delay, zip(app_array, repeat(ZONE)))
         p.close()
         p.join()
+        print("\n")
+        print(f"this took: {time.time() - t1} ")
+        time.sleep(DURATION + 90)
+        # time.sleep(DURATION)
+        token = cf_oauth_token()
+        for app in app_array:
+            guid = get_app_guid(token, app)
+            # execution_details(guid)
+            execution_details_plus_push_to_influx(app, guid)
+            app_state(token, app, guid)
     elif Chaos_Action == "KILL":
+        time.sleep(WAIT_TIME)
         p = Pool()
         result = p.starmap(crash, zip(app_array, repeat(ZONE)))
         p.close()
         p.join()
     elif Chaos_Action == "SCALE":
+        time.sleep(WAIT_TIME)
         p = Pool()
         result = p.map(app_scaling, app_array)
         p.close()
         p.join()
 
     elif Chaos_Action == "LOSS":
+        time.sleep(WAIT_TIME)
         p = Pool()
         result = p.starmap(loss, zip(app_array, repeat(ZONE)))
         p.close()
         p.join()
+
 
     elif Chaos_Action == "RECURRING_KILL":
         p1 = Pool()
@@ -835,23 +899,36 @@ if __name__ == '__main__':
         p1.close()
         p1.join()
 
-        p2 = Pool()
-        mapping_pool = p2.starmap(mapping, zip(guid_list, app_array))
-        p2.close()
-        p2.join()
+        # p2 = Pool()
+        # mapping_pool = p2.starmap(mapping, zip(guid_list, app_array))
+        # p2.close()
+        # p2.join()
+        #
+        # p3 = Pool()
+        # app_state_pool = p3.starmap(app_state, zip(repeat(token), app_array, guid_list))
+        # p3.close()
+        # p3.join()
 
-        p3 = Pool()
-        app_state_pool = p3.starmap(app_state, zip(repeat(token), app_array, guid_list))
-        p3.close()
-        p3.join()
+        # ZONE = get_zone()
 
-        ZONE = get_zone()
+        # p4 = Pool()
+        # result = p4.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
+        # p4.close()
+        # p4.join()
 
-        p4 = Pool()
-        result = p4.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
-        p4.close()
-        p4.join()
-
+        m = mp.Manager()
+        memorizedPaths = m.dict()
+        filepaths = m.dict()
+        cutoff = 1  ##
+        # use all available CPUs
+        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                       filepaths,
+                                                       cutoff))
+        degreelist = range(1)  ##
+        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+            result = p.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
+        p.close()
+        p.join()
 
     # print("\n")
     # print(f"this took: {time.time() - t1} ")
