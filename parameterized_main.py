@@ -860,16 +860,7 @@ if __name__ == '__main__':
         result = p.starmap(delay, zip(app_array, repeat(ZONE)))
         p.close()
         p.join()
-        print("\n")
-        print(f"this took: {time.time() - t1} ")
-        time.sleep(DURATION + 90)
-        # time.sleep(DURATION)
-        token = cf_oauth_token()
-        for app in app_array:
-            guid = get_app_guid(token, app)
-            # execution_details(guid)
-            execution_details_plus_push_to_influx(app, guid)
-            app_state(token, app, guid)
+
     elif Chaos_Action == "KILL":
         time.sleep(WAIT_TIME)
         p = Pool()
