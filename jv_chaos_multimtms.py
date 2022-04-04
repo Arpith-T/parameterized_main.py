@@ -239,8 +239,10 @@ def execution_data(guid, app):
 
     if execution_status == "FINISHED" or execution_status == "RUNNING":
         t1 = time.time()
+        time.sleep(4)
 
-        while instance_state(token, app, guid, instance_impacted) != "RUNNING":
+        instance_status = instance_state(token, app, guid, instance_impacted)
+        while instance_status != "RUNNING":
 
             infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
@@ -270,10 +272,11 @@ def execution_data(guid, app):
 
             if infra_client.write_points(chaos_details, protocol='json'):
                 print("Chaos Data Insertion success")
-                pass
+                instance_status = instance_state(token, app, guid, instance_impacted)
             else:
                 print("Chaos Data Insertion Failed")
                 print(chaos_details)
+                instance_status = instance_state(token, app, guid, instance_impacted)
 
         print("Instance is RUNNING")
         finish_time = time.localtime()
@@ -699,6 +702,38 @@ def delay(CF_Microservice, guid, ZONE):
 
     print(json.dumps(result, indent=4))
 
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+    infra_client.switch_database(f'{db_store}')
+    chaos_details = [
+        {
+            "measurement": "Chaos_Creation",
+            "tags": {
+                "CFMicroservice": CF_Microservice,
+                # "chaos_action": executions["kind"],
+                # "az": executions["selector"]["azs"][0],
+                # "IndexValue": executions["apps"][0]["instance"],
+                # "Execution_status": executions["apps"][0]["status"],
+                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                # "EndTime": converted_finish_time,
+                # "BuildDetail": BuildDetail,
+                "IAAS": IAAS,
+                # "Performed_By": Performed_By
+
+            },
+            "fields": {
+                "creation": str(result),
+                # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+            }
+        }
+    ]
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
     # guid = get_app_guid(token, CF_Microservice)
     #
     # print(f"The guid for '{CF_Microservice}' is '{guid}'")
@@ -755,6 +790,38 @@ def loss(CF_Microservice, guid, ZONE):
 
     print(json.dumps(result, indent=4))
 
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+    infra_client.switch_database(f'{db_store}')
+    chaos_details = [
+        {
+            "measurement": "Chaos_Creation",
+            "tags": {
+                "CFMicroservice": CF_Microservice,
+                # "chaos_action": executions["kind"],
+                # "az": executions["selector"]["azs"][0],
+                # "IndexValue": executions["apps"][0]["instance"],
+                # "Execution_status": executions["apps"][0]["status"],
+                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                # "EndTime": converted_finish_time,
+                # "BuildDetail": BuildDetail,
+                "IAAS": IAAS,
+                # "Performed_By": Performed_By
+
+            },
+            "fields": {
+                "creation": str(result),
+                # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+            }
+        }
+    ]
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
     while no_of_execution != expected_executions:
         # print("No other executions found")
         no_of_execution = execution_len(guid)
@@ -808,6 +875,38 @@ def recurring_kill(CF_Microservice, guid, ZONE):
     print(uuid)
 
     uuid_list.append(uuid)
+
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+    infra_client.switch_database(f'{db_store}')
+    chaos_details = [
+        {
+            "measurement": "Chaos_Creation",
+            "tags": {
+                "CFMicroservice": CF_Microservice,
+                # "chaos_action": executions["kind"],
+                # "az": executions["selector"]["azs"][0],
+                # "IndexValue": executions["apps"][0]["instance"],
+                # "Execution_status": executions["apps"][0]["status"],
+                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                # "EndTime": converted_finish_time,
+                # "BuildDetail": BuildDetail,
+                "IAAS": IAAS,
+                # "Performed_By": Performed_By
+
+            },
+            "fields": {
+                "creation": str(result),
+                # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+            }
+        }
+    ]
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
 
     while no_of_execution != expected_executions:
         # print("No other executions found")
