@@ -11,40 +11,23 @@ from dateutil import parser
 from datetime import datetime, timedelta
 from itertools import repeat
 
-# IAAS = os.getenv("IAAS")
-# LATENCY = int(os.getenv("LATENCY"))
-# LOSS_PERCENTAGE = int(os.getenv("LOSS_PERCENTAGE"))
-# DURATION = int(os.getenv("DURATION"))
-# recurring_every = int(os.getenv("recurring_every"))
-# app_string = os.getenv("CF_Microservice")
-# try:
-#     app_list = app_string.split(',')
-# except:
-#     pass
-#
-# Chaos_Action = os.getenv("Chaos_Action")
-# PASSWORD = os.getenv("PASSWORD")
-# tenant_name = os.getenv("TENANT")
-# BuildDetail = os.getenv("BuildReport")
-# WAIT_TIME = int(os.getenv("WAIT_TIME"))
+IAAS = os.getenv("IAAS")
+LATENCY = int(os.getenv("LATENCY"))
+LOSS_PERCENTAGE = int(os.getenv("LOSS_PERCENTAGE"))
+DURATION = int(os.getenv("DURATION"))
+recurring_every = int(os.getenv("recurring_every"))
+app_string = os.getenv("CF_Microservice")
+try:
+    app_list = app_string.split(',')
+except:
+    pass
 
-LATENCY = 5000
-DURATION = 300
-LOSS_PERCENTAGE = 50
-recurring_every = 5
-app_list = ["it-trm", "it-app", "it-app-prov"]
-Chaos_Action = "LOSS"
-# Chaos_Action = "DELAY"
-# Chaos_Action = "RECURRING_KILL"
-# Chaos_Action = "KILL"
-# Chaos_Action = "SCALE"
-PASSWORD = "Prisminfra529#5"
-# tenant_name = "awsiatmaz"
-tenant_name = " "
-BuildDetail = "Test_BuildReport"
-IAAS = "AZURE"
-Performed_By = "ARPITH"
-WAIT_TIME = 0
+Chaos_Action = os.getenv("Chaos_Action")
+PASSWORD = os.getenv("PASSWORD")
+tenant_name = os.getenv("TENANT")
+BuildDetail = os.getenv("BuildReport")
+WAIT_TIME = int(os.getenv("WAIT_TIME"))
+
 
 
 worker_list = []
@@ -912,13 +895,13 @@ if __name__ == '__main__':
 
     elif Chaos_Action == "KILL":
         time.sleep(WAIT_TIME)
-        p = Pool()
+        p = mp.Pool()
         result = p.starmap(crash, zip(app_array, repeat(ZONE)))
         p.close()
         p.join()
     elif Chaos_Action == "SCALE":
         time.sleep(WAIT_TIME)
-        p = Pool()
+        p = mp.Pool()
         result = p.map(app_scaling, app_array)
         p.close()
         p.join()

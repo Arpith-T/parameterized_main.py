@@ -7,25 +7,33 @@ import random
 import subprocess
 from influxdb import InfluxDBClient
 from dateutil import parser
-import datetime
+from datetime import datetime, timedelta
 
-LATENCY = int(os.getenv("LATENCY"))
-DURATION = int(os.getenv("DURATION"))
-app_string = os.getenv("CF_Microservice")
-app_list = app_string.split(',')
-Chaos_Action = os.getenv("Chaos_Action")
-PASSWORD = os.getenv("PASSWORD")
-tenant_name = os.getenv("TENANT")
+# LATENCY = int(os.getenv("LATENCY"))
+# DURATION = int(os.getenv("DURATION"))
+# app_string = os.getenv("CF_Microservice")
+# try:
+#     app_list = app_string.split(',')
+# except: pass
+#
+# Chaos_Action = os.getenv("Chaos_Action")
+# PASSWORD = os.getenv("PASSWORD")
+# tenant_name = os.getenv("TENANT")
+# BuildDetail = os.getenv("BuildReport")
+WAIT_TIME = int(os.getenv("WAIT_TIME"))
+
+LATENCY = 1000
+DURATION = 60
+app_list = []
+Chaos_Action = "DELAY"
+# Chaos_Action = "KILL"
+# Chaos_Action = "SCALE"
+PASSWORD = "Prisminfra529#5"
+tenant_name = "mc103"
+BuildDetail = "Test_BuildReport"
+IAAS = "AWS"
+Performed_By = "test123"
 # az = os.getenv("AZ")
-
-# LATENCY = 1000
-# DURATION = 30
-# app_list = ["it-op-odata", "it-runtime-api", "it-op-jobs"]
-# Chaos_Action = "DELAY"
-# # Chaos_Action = "KILL"
-# # Chaos_Action = "SCALE"
-# PASSWORD = "Prisminfra529#5"
-# tenant_name = "mc101"
 
 worker_list = []
 
@@ -71,29 +79,43 @@ def worker_name():
 
 if tenant_name == "":
     print("No Tenant selected for chaos action")
-    app_array = app_list
+    app_array = app_list  # when no worker is selected, only MTMS should be executed
     print(app_array)
 else:
-    worker = worker_name()
+    try:
+        worker = worker_name()
 
-    worker_list.append(worker)
+        worker_list.append(worker)
 
-    print(worker_list)
+        print(worker_list)
 
+
+        app_array = app_list + worker_list
+
+        print(app_array)
+    except:
+        print("No worker selected")
+        pass
+try:
     app_array = app_list + worker_list
+except: app_array = worker_list  # when there are no MTMS entered only worker list needs to be taken and executed
 
-    print(app_array)
+# def convert_utc_ist(utc):
+#     # utc = '2022-03-08T07:00:21.971538Z'  # or any date string of differing formats.
+#     utc_time = parser.parse(utc)
+#     # print(utc_time)
+#     hours = 5.30
+#     hours_added = datetime.timedelta(hours=hours)
+#     ist_time = utc_time + hours_added
+#     # print(ist_time)
+#     return ist_time
 
-def convert_utc_ist(utc):
-    # utc = '2022-03-08T07:00:21.971538Z'  # or any date string of differing formats.
-    utc_time = parser.parse(utc)
-    # print(utc_time)
-    hours = 5.30
-    hours_added = datetime.timedelta(hours=hours)
-    ist_time = utc_time + hours_added
-    # print(ist_time)
-    return ist_time
-
+def utc_to_ist(utc):
+    timestamp = datetime.strptime(utc, '%Y-%m-%dT%H:%M:%S')
+    # print(utc)
+    IST = timestamp + timedelta(hours=5, minutes=30)
+    # print(IST)
+    return IST
 
 def cf_oauth_token():
     url = "https://uaa.cf.sap.hana.ondemand.com/oauth/token"
@@ -361,10 +383,9 @@ def execution_details_plus_push_to_influx(app, guid):
     app_impacted = app
     instance_impacted = result["apps"][0]["instance"]
     print(f"instance impacted - {instance_impacted}")
-    start_of_chaos_action = result["start_date"]
-    end_of_chaos_action = result["end_date"]
-    BuildDetail = os.getenv(BuildReport) # This data will come from upstram jenkins job
-    # BuildDetail = "Test_BuildReport"
+    start_of_chaos_action = result["start_date"].split(".")[0]
+    end_of_chaos_action = result["end_date"].split(".")[0]
+
     chaos_details = [
         {
             "measurement": "InstanceCrashDetails",
@@ -373,9 +394,12 @@ def execution_details_plus_push_to_influx(app, guid):
                 "chaos_action": chaos_action_performed,
                 "az": az_impacted,
                 "IndexValue": instance_impacted,
-                "InstanceStartTime": convert_utc_ist(start_of_chaos_action),
-                "InstanceEndTime": convert_utc_ist(end_of_chaos_action),
-                "BuildDetail": BuildDetail
+                "InstanceStartTime": utc_to_ist(start_of_chaos_action),
+                "InstanceEndTime": utc_to_ist(end_of_chaos_action),
+                "BuildDetail": BuildDetail,
+                "IAAS": IAAS,
+                "Performed_By": Performed_By
+
             },
             "fields": {
                 "chaos": 1  # we will need to figure out as to what we need to add here and use it better
@@ -402,8 +426,10 @@ def app_state(token, app, guid):
     response = requests.request("GET", url, headers=headers, data=payload)
 
     # print(response.json())
-
-    number_of_instances = len(response.json()["resources"])
+    try:
+        number_of_instances = len(response.json()["resources"])
+    except:
+        pass
 
     print(f"Number of instances in '{app}' is  - '{number_of_instances}'")
 
@@ -412,6 +438,10 @@ def app_state(token, app, guid):
             f"Instance - {response.json()['resources'][i]['index']} of {app} is {response.json()['resources'][i]['state']}")
 
 if __name__ == '__main__':
+
+    time.sleep(60)
+    # time.sleep(WAIT_TIME)
+
     t1 = time.time()
 
     if Chaos_Action == "DELAY":
@@ -432,7 +462,8 @@ if __name__ == '__main__':
 
     print("\n")
     print(f"this took: {time.time() - t1} ")
-    time.sleep(120)
+    time.sleep(DURATION + 90)
+    # time.sleep(DURATION)
     token = cf_oauth_token()
     for app in app_array:
         guid = get_app_guid(token, app)

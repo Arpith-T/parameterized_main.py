@@ -14,7 +14,7 @@ def convert_utc_ist(utc):
 
 
 def main():
-    utc_test_time = "2022-03-08T07:00:21.971538Z"
+    utc_test_time = "2022-03-10T14:33:49"
     ist = convert_utc_ist(utc=utc_test_time)
     print(f"The UTC time is {utc_test_time}")
     print(f"The IST time is - {ist}")
