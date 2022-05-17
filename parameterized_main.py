@@ -14,7 +14,7 @@ from itertools import repeat
 # IAAS = os.getenv("IAAS")
 # LATENCY = int(os.getenv("LATENCY"))
 # LOSS_PERCENTAGE = int(os.getenv("LOSS_PERCENTAGE"))
-# DURATION = int(os.getenv("DURATION"))
+# Chaos_Duration = int(os.getenv("Chaos_Duration"))
 # recurring_every = int(os.getenv("recurring_every"))
 # app_string = os.getenv("CF_Microservice")
 # try:
@@ -25,25 +25,28 @@ from itertools import repeat
 # Chaos_Action = os.getenv("Chaos_Action")
 # PASSWORD = os.getenv("PASSWORD")
 # tenant_name = os.getenv("TENANT")
-# BuildDetail = os.getenv("BuildReport")
+# BuildDetails = os.getenv("BuildReport")
 # WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
-LATENCY = 2000
-DURATION = 600
-LOSS_PERCENTAGE = 50
+LATENCY = 1000
+Chaos_Duration = 60
+LOSS_PERCENTAGE = 25
 recurring_every = 5
-app_list = ["it-trm", "it-app", "it-app-prov"]
+app_list = ["it-co", "it-trm"]
 # Chaos_Action = "LOSS"
 # Chaos_Action = "DELAY"
-Chaos_Action = "RECURRING_KILL"
+# Chaos_Action = "RECURRING_KILL"
+# Chaos_Action = "INGRESS_DELAY"
+Chaos_Action = "INGRESS_LOSS"
 # Chaos_Action = "KILL"
 # Chaos_Action = "SCALE"
 PASSWORD = "Prisminfra529#5"
 # tenant_name = "awsiatmaz"
 tenant_name = " "
-BuildDetail = "Test_BuildReport"
+BuildDetails = "ingress_test"
 IAAS = "AWS"
-Performed_By = "ARPITH"
+# Performed_By = "Ather"
+# Persona = "design"
 WAIT_TIME = 0
 
 
@@ -51,6 +54,7 @@ worker_list = []
 uuid_list = []
 list_of_executions = []
 list_of_guids = []
+list_of_process_guids = [] # to get the process/instance state - this will handle it-rootwebapp exception
 
 ### multiprocessing with all the cores #####
 # Refer - https://stackoverflow.com/questions/19086106/how-to-utilize-all-cores-with-python-multiprocessing
@@ -160,6 +164,8 @@ def cf_oauth_token():
 token = cf_oauth_token()
 
 
+
+
 def get_app_guid(token, app):
     url = f"{cf_base_url}/v3/apps?page=1&per_page=1000&space_guids={space_id}&names={app}"
 
@@ -174,6 +180,25 @@ def get_app_guid(token, app):
     guid = json.loads(response.text)["resources"][0]["guid"]
 
     return guid
+    #
+    # """ NOTE - the below process is done to handle a scenario where it-rootwebapp does not
+    # consider guid picked from the above api as proper guid to get instance/process info.
+    # Hence, we need to futher filter it to get the guid within the process. to standardize the process we are using it for all apps and see how it works """
+    #
+    #
+    # process_url = f"{cf_base_url}/v3/apps/{guid_1}/processes"
+    #
+    # payload = {}
+    # headers = {
+    #     'Authorization': f'Bearer {token}'
+    #     # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
+    # }
+    #
+    # process_response = requests.request("GET", process_url, headers=headers, data=payload).json()
+    #
+    # guid = process_response["resources"][0]["guid"]
+    #
+    # return guid
 
 
 # guid = get_app_guid()
@@ -191,9 +216,31 @@ def mapping(guid, app):
     print(f"\nfor '{app}'\n{response.json()}")
 
 
+def get_process_guid(guid, app, token):
+    """ NOTE - the below process is done to handle a scenario where it-rootwebapp does not
+    consider guid picked from the above api as proper guid to get instance/process info.
+    Hence, we need to futher filter it to get the guid within the process. to standardize the process we are using it for all apps and see how it works """
+
+
+    process_url = f"{cf_base_url}/v3/apps/{guid}/processes"
+
+    payload = {}
+    headers = {
+        'Authorization': f'Bearer {token}'
+        # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
+    }
+
+    process_response = requests.request("GET", process_url, headers=headers, data=payload).json()
+
+    process_guid = process_response["resources"][0]["guid"]
+
+    return process_guid
+
+
 def instance_state(token, app, guid, instance_impacted):
     global instance_status
-    url = f"{cf_base_url}/v3/processes/{guid}/stats"
+    process_guid = get_process_guid(guid, app, token)
+    url = f"{cf_base_url}/v3/processes/{process_guid}/stats"
 
     payload = {}
     headers = {
@@ -274,9 +321,10 @@ def execution_data(guid, app):
                         "IndexValue": executions["apps"][0]["instance"],
                         "Execution_status": executions["apps"][0]["status"],
                         "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                        "BuildDetail": BuildDetail,
+                        "BuildDetails": BuildDetails,
                         "IAAS": IAAS,
-                        # "Performed_By": Performed_By
+                        # "Performed_By": Performed_By,
+                        # "Persona": Persona
 
                     },
                     "fields": {
@@ -313,9 +361,10 @@ def execution_data(guid, app):
                     "Execution_status": executions["apps"][0]["status"],
                     "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                     "EndTime": converted_finish_time,
-                    "BuildDetail": BuildDetail,
+                    "BuildDetails": BuildDetails,
                     "IAAS": IAAS,
-                    # "Performed_By": Performed_By
+                    # "Performed_By": Performed_By,
+                    # "Persona":Persona
 
                 },
                 "fields": {
@@ -350,9 +399,10 @@ def execution_data(guid, app):
                     "IndexValue": executions["apps"][0]["instance"],
                     "Execution_status": executions["apps"][0]["status"],
                     "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                    "BuildDetail": BuildDetail,
+                    "BuildDetails": BuildDetails,
                     "IAAS": IAAS,
-                    # "Performed_By": Performed_By
+                    # "Performed_By": Performed_By,
+                    # "Persona":Persona
 
                 },
                 "fields": {
@@ -571,7 +621,7 @@ def execution_details_plus_push_to_influx(app, guid, chaos_field):
     test_time = datetime.strptime(start_of_chaos_action, '%Y-%m-%dT%H:%M:%S')
     # print(test_time)
     # end_of_chaos_action = result["end_date"].split(".")[0]
-    end_of_chaos_action = str(test_time + timedelta(hours=5, minutes=30, seconds=DURATION))
+    end_of_chaos_action = str(test_time + timedelta(hours=5, minutes=30, seconds=Chaos_Duration))
     # print(end_of_chaos_action)
 
     chaos_details = [
@@ -585,9 +635,10 @@ def execution_details_plus_push_to_influx(app, guid, chaos_field):
                 "InstanceStartTime": utc_to_ist(start_of_chaos_action),
                 # "InstanceEndTime": utc_to_ist(end_of_chaos_action),
                 "InstanceEndTime": end_of_chaos_action,
-                "BuildDetail": BuildDetail,
+                "BuildDetails": BuildDetails,
                 "IAAS": IAAS,
-                # "Performed_By": Performed_By
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
 
             },
             "fields": {
@@ -678,7 +729,7 @@ def app_scaling(CF_Microservice):
             subprocess.run(f'cf scale {CF_Microservice} -i 2')
             print(f"scale down of {CF_Microservice} is done")
 
-    time.sleep(DURATION)
+    time.sleep(Chaos_Duration)
 
     for CF_Microservice in app_list:
         subprocess.run(f'cf scale {CF_Microservice} -i 3')
@@ -706,7 +757,7 @@ def delay(CF_Microservice, guid, ZONE):
             "latency": LATENCY
         },
         "repeatability": "ONCE",
-        "duration": DURATION
+        "duration": Chaos_Duration
     })
     headers = {
         'Content-Type': 'application/json',
@@ -733,9 +784,10 @@ def delay(CF_Microservice, guid, ZONE):
                 # "Execution_status": executions["apps"][0]["status"],
                 # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                 # "EndTime": converted_finish_time,
-                # "BuildDetail": BuildDetail,
+                "BuildDetails": BuildDetails,
                 "IAAS": IAAS,
-                # "Performed_By": Performed_By
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
 
             },
             "fields": {
@@ -755,7 +807,7 @@ def delay(CF_Microservice, guid, ZONE):
     #
     # print(f"The guid for '{CF_Microservice}' is '{guid}'")
     #
-    # time.sleep(DURATION + 90)
+    # time.sleep(Chaos_Duration + 90)
 
     while no_of_execution != expected_executions:
         # print("No other executions found")
@@ -767,7 +819,94 @@ def delay(CF_Microservice, guid, ZONE):
 
     start_time = time.time()
 
-    while time.time() < (start_time + DURATION):
+    while time.time() < (start_time + Chaos_Duration):
+        begin_time = time.time()
+        execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+
+def ingress_delay(CF_Microservice, guid, ZONE):
+
+    no_of_execution = (execution_len(guid))
+    expected_executions = no_of_execution + 1
+
+    url = f"{chaos_url}/api/v1/tasks"
+
+    payload = json.dumps({
+        "app_name": CF_Microservice,
+        "selector": {
+            "percentage": 50,
+
+            "azs": [
+                ZONE
+            ]
+        },
+        "kind": "MANIPULATE_INGRESS_NETWORK",
+        "config": {
+            "latency": LATENCY
+        },
+        "repeatability": "ONCE",
+        "duration": Chaos_Duration
+    })
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Basic {chaos_auth}"
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)
+
+    print(json.dumps(result, indent=4))
+
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+    infra_client.switch_database(f'{db_store}')
+    chaos_details = [
+        {
+            "measurement": "Chaos_Creation",
+            "tags": {
+                "CFMicroservice": CF_Microservice,
+                # "chaos_action": executions["kind"],
+                # "az": executions["selector"]["azs"][0],
+                # "IndexValue": executions["apps"][0]["instance"],
+                # "Execution_status": executions["apps"][0]["status"],
+                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                # "EndTime": converted_finish_time,
+                "BuildDetails": BuildDetails,
+                "IAAS": IAAS,
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
+
+            },
+            "fields": {
+                "creation": str(result),
+                # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+            }
+        }
+    ]
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
+    # guid = get_app_guid(token, CF_Microservice)
+    #
+    # print(f"The guid for '{CF_Microservice}' is '{guid}'")
+    #
+    # time.sleep(Chaos_Duration + 90)
+
+    while no_of_execution != expected_executions:
+        # print("No other executions found")
+        no_of_execution = execution_len(guid)
+        time.sleep(5)
+
+    # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+    # app_state(token, CF_Microservice, guid)
+
+    start_time = time.time()
+
+    while time.time() < (start_time + Chaos_Duration):
         begin_time = time.time()
         execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
 
@@ -794,7 +933,7 @@ def loss(CF_Microservice, guid, ZONE):
             "percentage_loss": LOSS_PERCENTAGE
         },
         "repeatability": "ONCE",
-        "duration": DURATION
+        "duration": Chaos_Duration
     })
     headers = {
         'Content-Type': 'application/json',
@@ -821,9 +960,10 @@ def loss(CF_Microservice, guid, ZONE):
                 # "Execution_status": executions["apps"][0]["status"],
                 # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                 # "EndTime": converted_finish_time,
-                # "BuildDetail": BuildDetail,
+                "BuildDetails": BuildDetails,
                 "IAAS": IAAS,
-                # "Performed_By": Performed_By
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
 
             },
             "fields": {
@@ -849,10 +989,97 @@ def loss(CF_Microservice, guid, ZONE):
 
     start_time = time.time()
 
-    while time.time() < (start_time + DURATION):
+    while time.time() < (start_time + Chaos_Duration):
         begin_time = time.time()
         execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
 
+
+def ingress_loss(CF_Microservice, guid, ZONE):
+
+    no_of_execution = (execution_len(guid))
+    expected_executions = no_of_execution + 1
+
+    url = f"{chaos_url}/api/v1/tasks"
+
+    payload = json.dumps({
+        "app_name": CF_Microservice,
+        "selector": {
+            "percentage": 50,
+
+            "azs": [
+                ZONE
+            ]
+        },
+        "kind": "MANIPULATE_INGRESS_NETWORK",
+        "config": {
+            "percentage_loss": LOSS_PERCENTAGE
+        },
+        "repeatability": "ONCE",
+        "duration": Chaos_Duration
+    })
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Basic {chaos_auth}"
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)
+
+    print(json.dumps(result, indent=4))
+
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+    infra_client.switch_database(f'{db_store}')
+    chaos_details = [
+        {
+            "measurement": "Chaos_Creation",
+            "tags": {
+                "CFMicroservice": CF_Microservice,
+                # "chaos_action": executions["kind"],
+                # "az": executions["selector"]["azs"][0],
+                # "IndexValue": executions["apps"][0]["instance"],
+                # "Execution_status": executions["apps"][0]["status"],
+                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                # "EndTime": converted_finish_time,
+                "BuildDetails": BuildDetails,
+                "IAAS": IAAS,
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
+
+            },
+            "fields": {
+                "creation": str(result),
+                # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+            }
+        }
+    ]
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
+    # guid = get_app_guid(token, CF_Microservice)
+    #
+    # print(f"The guid for '{CF_Microservice}' is '{guid}'")
+    #
+    # time.sleep(Chaos_Duration + 90)
+
+    while no_of_execution != expected_executions:
+        # print("No other executions found")
+        no_of_execution = execution_len(guid)
+        time.sleep(5)
+
+    # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+    # app_state(token, CF_Microservice, guid)
+
+    start_time = time.time()
+
+    while time.time() < (start_time + Chaos_Duration):
+        begin_time = time.time()
+        execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
 
 def recurring_kill(CF_Microservice, guid, ZONE):
     # guid = get_app_guid(token, app)
@@ -907,9 +1134,10 @@ def recurring_kill(CF_Microservice, guid, ZONE):
                 # "Execution_status": executions["apps"][0]["status"],
                 # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                 # "EndTime": converted_finish_time,
-                # "BuildDetail": BuildDetail,
+                "BuildDetails": BuildDetails,
                 "IAAS": IAAS,
-                # "Performed_By": Performed_By
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
 
             },
             "fields": {
@@ -932,7 +1160,7 @@ def recurring_kill(CF_Microservice, guid, ZONE):
 
     start_time = time.time()
 
-    while time.time() < (start_time + DURATION):
+    while time.time() < (start_time + Chaos_Duration):
         begin_time = time.time()
         execution_data(guid, CF_Microservice)
         end_time = time.time()
@@ -1043,6 +1271,54 @@ if __name__ == '__main__':
         degreelist = range(1)  ##
         for _ in p.imap_unordered(work, degreelist, chunksize=5000):
             result = p.starmap(loss, zip(app_array, guid_list, repeat(ZONE)))
+        p.close()
+        p.join()
+
+    elif Chaos_Action == "INGRESS_LOSS":
+        p1 = mp.Pool()
+        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                 app_array))
+        print(guid_list)
+        p1.close()
+        p1.join()
+
+        time.sleep(WAIT_TIME)
+
+        m = mp.Manager()
+        memorizedPaths = m.dict()
+        filepaths = m.dict()
+        cutoff = 1  ##
+        # use all available CPUs
+        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                       filepaths,
+                                                       cutoff))
+        degreelist = range(1)  ##
+        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+            result = p.starmap(ingress_loss, zip(app_array, guid_list, repeat(ZONE)))
+        p.close()
+        p.join()
+
+    elif Chaos_Action == "INGRESS_DELAY":
+        p1 = mp.Pool()
+        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                 app_array))
+        print(guid_list)
+        p1.close()
+        p1.join()
+
+        time.sleep(WAIT_TIME)
+
+        m = mp.Manager()
+        memorizedPaths = m.dict()
+        filepaths = m.dict()
+        cutoff = 1  ##
+        # use all available CPUs
+        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                       filepaths,
+                                                       cutoff))
+        degreelist = range(1)  ##
+        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+            result = p.starmap(ingress_delay, zip(app_array, guid_list, repeat(ZONE)))
         p.close()
         p.join()
 
