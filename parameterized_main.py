@@ -29,21 +29,21 @@ from itertools import repeat
 # WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
 LATENCY = 1000
-Chaos_Duration = 60
+Chaos_Duration = 480
 LOSS_PERCENTAGE = 25
-recurring_every = 5
-app_list = ["it-co", "it-trm"]
+recurring_every = 4
+app_list = ["it-op-jobs","it-op-odata","it-app","it-app-prov"]
 # Chaos_Action = "LOSS"
 # Chaos_Action = "DELAY"
-# Chaos_Action = "RECURRING_KILL"
+Chaos_Action = "RECURRING_KILL"
 # Chaos_Action = "INGRESS_DELAY"
-Chaos_Action = "INGRESS_LOSS"
+# Chaos_Action = "INGRESS_LOSS"
 # Chaos_Action = "KILL"
 # Chaos_Action = "SCALE"
 PASSWORD = "Prisminfra529#5"
-# tenant_name = "awsiatmaz"
-tenant_name = " "
-BuildDetails = "ingress_test"
+tenant_name = ""
+# tenant_name = "awsiatmaz-02"
+BuildDetails = "test"
 IAAS = "AWS"
 # Performed_By = "Ather"
 # Persona = "design"
@@ -144,6 +144,13 @@ def utc_to_ist(utc):
     # print(IST)
     return IST
 
+def date_symmetry(utc):
+    timestamp = datetime.strptime(utc, '%Y-%m-%dT%H:%M:%S')
+    # print(utc)
+    # IST = timestamp + timedelta(hours=5, minutes=30)
+    # print(IST)
+    # return IST
+    return timestamp
 
 def cf_oauth_token():
     url = f"{cf_oauth_url}/oauth/token"
@@ -167,38 +174,25 @@ token = cf_oauth_token()
 
 
 def get_app_guid(token, app):
-    url = f"{cf_base_url}/v3/apps?page=1&per_page=1000&space_guids={space_id}&names={app}"
+    try:
+        url = f"{cf_base_url}/v3/apps?page=1&per_page=1000&space_guids={space_id}&names={app}"
 
-    payload = {}
-    headers = {
-        'Authorization': f'Bearer {token}'
-        # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
-    }
+        payload = {}
+        headers = {
+            'Authorization': f'Bearer {token}'
+            # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
+        }
 
-    response = requests.request("GET", url, headers=headers, data=payload)
+        response = requests.request("GET", url, headers=headers, data=payload)
 
-    guid = json.loads(response.text)["resources"][0]["guid"]
+        guid = json.loads(response.text)["resources"][0]["guid"]
 
-    return guid
-    #
-    # """ NOTE - the below process is done to handle a scenario where it-rootwebapp does not
-    # consider guid picked from the above api as proper guid to get instance/process info.
-    # Hence, we need to futher filter it to get the guid within the process. to standardize the process we are using it for all apps and see how it works """
-    #
-    #
-    # process_url = f"{cf_base_url}/v3/apps/{guid_1}/processes"
-    #
-    # payload = {}
-    # headers = {
-    #     'Authorization': f'Bearer {token}'
-    #     # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
-    # }
-    #
-    # process_response = requests.request("GET", process_url, headers=headers, data=payload).json()
-    #
-    # guid = process_response["resources"][0]["guid"]
-    #
-    # return guid
+        return guid
+    except:
+        print(f"\n unable to fetch guid for {app}. There might couple of reasons for this - \n"
+              f"1. Software Update might be in progress Or\n"
+              f"2. There might be some deployment issue due to which there might be some duplication of applications."
+              f"Please contact Infra team to understand the root cause and resolution for the same")
 
 
 # guid = get_app_guid()
@@ -237,6 +231,35 @@ def get_process_guid(guid, app, token):
     return process_guid
 
 
+# def instance_state(token, app, guid, instance_impacted):
+#     # global instance_status
+#     if instance_impacted == "No_Instance_Available":
+#         instance_status == "NA"
+#         print(f"Instance state is {instance_status}")
+#         return instance_status
+#     else:
+#         process_guid = get_process_guid(guid, app, token)
+#         url = f"{cf_base_url}/v3/processes/{process_guid}/stats"
+#
+#         payload = {}
+#         headers = {
+#             'Authorization': f'Bearer {token}'
+#         }
+#
+#         response = requests.request("GET", url, headers=headers, data=payload)
+#
+#         # print(response.json())
+#         try:
+#             number_of_instances = len(response.json()["resources"])
+#             print(f"Number of instances in '{app}' is  - '{number_of_instances}'")
+#         except:
+#             pass
+#         try:
+#             instance_status = response.json()['resources'][instance_impacted]['state']
+#             print(f"instance status is - {instance_status}")
+#         except:
+#             return instance_status
+
 def instance_state(token, app, guid, instance_impacted):
     global instance_status
     process_guid = get_process_guid(guid, app, token)
@@ -257,10 +280,12 @@ def instance_state(token, app, guid, instance_impacted):
         pass
     try:
         instance_status = response.json()['resources'][instance_impacted]['state']
+        print(f"instance status is - {instance_status}")
+        return instance_status
     except:
-        pass
+        return None
 
-    return instance_status
+
 
 
 def execution_len(guid):
@@ -297,17 +322,47 @@ def execution_data(guid, app):
     print(f"\nfor {app} - \n{executions}")
 
     execution_status = executions["apps"][0]["status"]
+    print(f"The execution status is -  {execution_status}")
+    if execution_status == "Failed":
+        print("***Execution Failed***")
+        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+        infra_client.switch_database(f'{db_store}')
+        chaos_details = [
+            {
+                "measurement": "MultiMTMS_Recurring_kill",
+                "tags": {
+                    "CFMicroservice": executions["MTMS"],
+                    "chaos_action": executions["kind"],
+                    "az": executions["selector"]["azs"][0],
+                    # "IndexValue": executions["apps"][0]["instance"],
+                    "IndexValue": "NA",
+                    "Execution_status": "Failed",
+                    # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                    "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                    "EndTime": "NA",
+                    "BuildDetails": BuildDetails,
+                    "IAAS": IAAS,
+                },
+                "fields": {
+                    "execution_data": str(executions),
+                    "chaos": 0  # we will need to figure out as to what we need to add here and use it better
+                }
+            }
+        ]
+        if infra_client.write_points(chaos_details, protocol='json'):
+            print("Chaos Data Insertion success")
+            pass
+        else:
+            print("Chaos Data Insertion Failed")
+            print(chaos_details)
+    else:
+        try:
+            instance_impacted = executions["apps"][0]["instance"]
+        except KeyError:
+            instance_impacted = "No_Instance_Available"
+            print("Instance not available in this zone to perform any chaos action")
 
-    instance_impacted = executions["apps"][0]["instance"]
-    instance_state(token, app, guid, instance_impacted)
-
-    if execution_status == "FINISHED" or execution_status == "RUNNING":
-        t1 = time.time()
-        time.sleep(4)
-
-        instance_status = instance_state(token, app, guid, instance_impacted)
-        while instance_status != "RUNNING":
-
+        if instance_impacted == "No_Instance_Available":
             infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
             infra_client.switch_database(f'{db_store}')
@@ -318,129 +373,179 @@ def execution_data(guid, app):
                         "CFMicroservice": executions["MTMS"],
                         "chaos_action": executions["kind"],
                         "az": executions["selector"]["azs"][0],
-                        "IndexValue": executions["apps"][0]["instance"],
-                        "Execution_status": executions["apps"][0]["status"],
-                        "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                        # "IndexValue": executions["apps"][0]["instance"],
+                        "IndexValue": None,
+                        "Execution_status": FAILED,
+                        # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                        "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                        "EndTime": None,
                         "BuildDetails": BuildDetails,
                         "IAAS": IAAS,
                         # "Performed_By": Performed_By,
-                        # "Persona": Persona
+                        # "Persona":Persona
 
                     },
                     "fields": {
-                        # "execution_data": str(executions),
+                        "execution_data": str(executions),
                         "chaos": 1  # we will need to figure out as to what we need to add here and use it better
                     }
                 }
             ]
-            # print(chaos_details)
 
-            if infra_client.write_points(chaos_details, protocol='json'):
-                print("Chaos Data Insertion success")
+
+        else:
+            instance_state(token, app, guid, instance_impacted)
+
+            if execution_status == "Finished" or execution_status == "RUNNING" or execution_status == "Running":
+                t1 = time.time()
+                print(f"{t1}")
+                time.sleep(4)
                 instance_status = instance_state(token, app, guid, instance_impacted)
-            else:
-                print("Chaos Data Insertion Failed")
+                print(f"Instance status is - {instance_status}")
+                while instance_status != "RUNNING" and instance_status == "NA":
+                    instance_status = instance_state(token, app, guid, instance_impacted)
+                    time.sleep(1)
+                #     infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+                #     infra_client.switch_database(f'{db_store}')
+                #     chaos_details = [
+                #         {
+                #             "measurement": "MultiMTMS_Recurring_kill",
+                #             "tags": {
+                #                 "CFMicroservice": executions["MTMS"],
+                #                 "chaos_action": executions["kind"],
+                #                 "az": executions["selector"]["azs"][0],
+                #                 "IndexValue": executions["apps"][0]["instance"],
+                #                 "Execution_status": executions["apps"][0]["status"],
+                #                 # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                #                 "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                #                 "BuildDetails": BuildDetails,
+                #                 "IAAS": IAAS
+                #             },
+                #             "fields": {
+                #                 # "execution_data": str(executions),
+                #                 "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                #             }
+                #         }
+                #     ]
+                #     # print(chaos_details)
+                #
+                #     if infra_client.write_points(chaos_details, protocol='json'):
+                #         print("Chaos Data Insertion success")
+                #         instance_status = instance_state(token, app, guid, instance_impacted)
+                #         print(f"Instance status is - {instance_status}")
+                #     else:
+                #         print("Chaos Data Insertion Failed")
+                #         print(chaos_details)
+                #         instance_status = instance_state(token, app, guid, instance_impacted)
+                #
+                # print("Instance is RUNNING")
+                # finish_time = time.localtime()
+                finish_time = datetime.utcnow()
+                print(f"The finish time is - {finish_time}")
+                # converted_finish_time = time.strftime("%H:%M:%S", finish_time)
+                converted_finish_time = finish_time.strftime("%Y-%m-%d %H:%M:%S")
+                print(f"The uptime is {converted_finish_time}")
+
+                infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+                infra_client.switch_database(f'{db_store}')
+                chaos_details = [
+                    {
+                        "measurement": "MultiMTMS_Recurring_kill",
+                        "tags": {
+                            "CFMicroservice": executions["MTMS"],
+                            "chaos_action": executions["kind"],
+                            "az": executions["selector"]["azs"][0],
+                            # "IndexValue": executions["apps"][0]["instance"],
+                            "IndexValue": instance_impacted,
+                            "Execution_status": executions["apps"][0]["status"],
+                            # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                            "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                            "EndTime": converted_finish_time,
+                            "BuildDetails": BuildDetails,
+                            "IAAS": IAAS,
+                            # "Performed_By": Performed_By,
+                            # "Persona":Persona
+
+                        },
+                        "fields": {
+                            "execution_data": str(executions),
+                            "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                        }
+                    }
+                ]
+
                 print(chaos_details)
-                instance_status = instance_state(token, app, guid, instance_impacted)
 
-        print("Instance is RUNNING")
-        finish_time = time.localtime()
-        converted_finish_time = time.strftime("%H:%M:%S", finish_time)
-        print(f"The uptime is {converted_finish_time}")
-        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+                if infra_client.write_points(chaos_details, protocol='json'):
+                    print("Chaos Data Insertion success")
+                    pass
+                else:
+                    print("Chaos Data Insertion Failed")
+                    print(chaos_details)
 
-        infra_client.switch_database(f'{db_store}')
-        chaos_details = [
-            {
-                "measurement": "MultiMTMS_Recurring_kill",
-                "tags": {
-                    "CFMicroservice": executions["MTMS"],
-                    "chaos_action": executions["kind"],
-                    "az": executions["selector"]["azs"][0],
-                    "IndexValue": executions["apps"][0]["instance"],
-                    "Execution_status": executions["apps"][0]["status"],
-                    "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                    "EndTime": converted_finish_time,
-                    "BuildDetails": BuildDetails,
-                    "IAAS": IAAS,
-                    # "Performed_By": Performed_By,
-                    # "Persona":Persona
+                t2 = time.time()
+                RTO = t2 - t1
+                print(f"RTO time - {RTO}")
+            else:
+                print("Execution failed")
+                infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
-                },
-                "fields": {
-                    "execution_data": str(executions),
-                    "chaos": 1  # we will need to figure out as to what we need to add here and use it better
-                }
-            }
-        ]
+                infra_client.switch_database(f'{db_store}')
+                chaos_details = [
+                    {
+                        "measurement": "MultiMTMS_Recurring_kill",
+                        "tags": {
+                            "CFMicroservice": executions["MTMS"],
+                            "chaos_action": executions["kind"],
+                            "az": executions["selector"]["azs"][0],
+                            # "IndexValue": executions["apps"][0]["instance"],
+                            "IndexValue": instance_impacted,
+                            "Execution_status": executions["apps"][0]["status"],
+                            # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                            "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                            "BuildDetails": BuildDetails,
+                            "IAAS": IAAS,
+                            # "Performed_By": Performed_By,
+                            # "Persona":Persona
 
-        if infra_client.write_points(chaos_details, protocol='json'):
-            print("Chaos Data Insertion success")
-            pass
-        else:
-            print("Chaos Data Insertion Failed")
-            print(chaos_details)
+                        },
+                        "fields": {
+                            "execution_data": str(executions),
+                            "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                        }
+                    }
+                ]
+                # print(chaos_details)
 
-        t2 = time.time()
-        RTO = t2 - t1
-        print(f"RTO time - {RTO}")
-    else:
-        print("Execution failed")
-        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+                if infra_client.write_points(chaos_details, protocol='json'):
+                    print("Chaos Data Insertion success")
+                    pass
+                else:
+                    print("Chaos Data Insertion Failed")
+                    print(chaos_details)
 
-        infra_client.switch_database(f'{db_store}')
-        chaos_details = [
-            {
-                "measurement": "MultiMTMS_Recurring_kill",
-                "tags": {
-                    "CFMicroservice": executions["MTMS"],
-                    "chaos_action": executions["kind"],
-                    "az": executions["selector"]["azs"][0],
-                    "IndexValue": executions["apps"][0]["instance"],
-                    "Execution_status": executions["apps"][0]["status"],
-                    "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                    "BuildDetails": BuildDetails,
-                    "IAAS": IAAS,
-                    # "Performed_By": Performed_By,
-                    # "Persona":Persona
+            print("Instance is RUNNING")
 
-                },
-                "fields": {
-                    "execution_data": str(executions),
-                    "chaos": 1  # we will need to figure out as to what we need to add here and use it better
-                }
-            }
-        ]
-        # print(chaos_details)
+            # print(f"\n{executions}")
+            #
+            # try:
+            #     print(f"no - of executions for '{app} -'{len(executions)}'")
+            # except: pass
+            #
+            # return executions
 
-        if infra_client.write_points(chaos_details, protocol='json'):
-            print("Chaos Data Insertion success")
-            pass
-        else:
-            print("Chaos Data Insertion Failed")
-            print(chaos_details)
+            # execution_status = response.json()[0]["apps"][0]["status"]
 
-    print("Instance is RUNNING")
+            # print(execution_status)
 
-    # print(f"\n{executions}")
-    #
-    # try:
-    #     print(f"no - of executions for '{app} -'{len(executions)}'")
-    # except: pass
-    #
-    # return executions
-
-    # execution_status = response.json()[0]["apps"][0]["status"]
-
-    # print(execution_status)
-
-    # if execution_status == "FAILED":
-    #     print(f"No instance of {app} exists in {ZONE}")
-    #     print(f"The current mapping of instances are as below:\n{mapping()}")
-    #     return execution_status
-    # else:
-    #     time.sleep(360)
-    #     return execution_status
+            # if execution_status == "FAILED":
+            #     print(f"No instance of {app} exists in {ZONE}")
+            #     print(f"The current mapping of instances are as below:\n{mapping()}")
+            #     return execution_status
+            # else:
+            #     time.sleep(360)
+            #     return execution_status
 
 
 def delete_task(uuid, app):
@@ -480,6 +585,10 @@ def get_zone():
         app_dict["zones_of_" + app] = []  # https://stackoverflow.com/questions/23999801/creating-multiple-lists
         guid = get_app_guid(token, app)
 
+        # process_guid = get_process_guid(guid, app, token)
+        #
+        # print(f"this is process guid - {process_guid}")
+
         url = f"{chaos_url}/api/v1/apps/{guid}/mapping"
 
         payload = {}
@@ -490,13 +599,14 @@ def get_zone():
 
         response = requests.request("GET", url, headers=headers, data=payload)
 
-        # print(response.json())
+        print(response.json())
 
         # print(f"No. of instances - {len(response.json()['mapping'])}")
 
         app_z = response.json()
 
-        # print(app_z["mapping"]["0"]["name"])
+
+        print(app_z["mapping"]["0"]["name"])
 
         for zone in range(0, len(response.json()["mapping"])):
             i = str(zone)
@@ -621,7 +731,8 @@ def execution_details_plus_push_to_influx(app, guid, chaos_field):
     test_time = datetime.strptime(start_of_chaos_action, '%Y-%m-%dT%H:%M:%S')
     # print(test_time)
     # end_of_chaos_action = result["end_date"].split(".")[0]
-    end_of_chaos_action = str(test_time + timedelta(hours=5, minutes=30, seconds=Chaos_Duration))
+    # end_of_chaos_action = str(test_time + timedelta(hours=5, minutes=30, seconds=Chaos_Duration))
+    end_of_chaos_action = str(test_time + timedelta(seconds=Chaos_Duration))
     # print(end_of_chaos_action)
 
     chaos_details = [
@@ -632,7 +743,8 @@ def execution_details_plus_push_to_influx(app, guid, chaos_field):
                 "chaos_action": chaos_action_performed,
                 "az": az_impacted,
                 "IndexValue": instance_impacted,
-                "InstanceStartTime": utc_to_ist(start_of_chaos_action),
+                # "InstanceStartTime": utc_to_ist(start_of_chaos_action),
+                "InstanceStartTime": date_symmetry(start_of_chaos_action),
                 # "InstanceEndTime": utc_to_ist(end_of_chaos_action),
                 "InstanceEndTime": end_of_chaos_action,
                 "BuildDetails": BuildDetails,
@@ -642,7 +754,68 @@ def execution_details_plus_push_to_influx(app, guid, chaos_field):
 
             },
             "fields": {
-                "chaos": chaos_field  # we will need to figure out as to what we need to add here and use it better
+                "chaos": chaos_field,  # we will need to figure out as to what we need to add here and use it better
+                # "execution_status": str(result)
+            }
+        }
+    ]
+    # print(chaos_details)
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+        pass
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
+
+def execution_finish_push_to_influx(app, guid):
+
+    url = f"{chaos_url}/api/v1/apps/{guid}/executions"
+
+    payload = {}
+    headers = {
+        'Authorization': f"Basic {chaos_auth}"
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)[0]
+
+    print(json.dumps(result, indent=2))
+
+    # data = response.json()
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+    infra_client.switch_database(f'{db_store}')
+
+    chaos_action_performed = result["kind"]
+
+    Status = result["apps"][0]["status"]
+
+    print(f"The status is - {Status}")
+
+    # Status =
+
+    app_impacted = app
+
+
+    chaos_details = [
+        {
+            "measurement": "InstanceCrashDetails",
+            "tags": {
+                "CFMicroservice": app_impacted,
+                "chaos_action": chaos_action_performed,
+                # "BuildDetails": BuildDetails,
+                # "IAAS": IAAS,
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
+                #Status = "running"
+
+            },
+            "fields": {
+                # "chaos": chaos_field,  # we will need to figure out as to what we need to add here and use it better
+                "execution_status": str(result)
             }
         }
     ]
@@ -744,7 +917,8 @@ def delay(CF_Microservice, guid, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
-        "app_name": CF_Microservice,
+        # "app_name": CF_Microservice,
+        "app_guid": guid,
         "selector": {
             "percentage": 50,
 
@@ -823,6 +997,11 @@ def delay(CF_Microservice, guid, ZONE):
         begin_time = time.time()
         execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
 
+    time.sleep(5)
+
+    execution_finish_push_to_influx(CF_Microservice,guid)
+
+
 def ingress_delay(CF_Microservice, guid, ZONE):
 
     no_of_execution = (execution_len(guid))
@@ -831,7 +1010,8 @@ def ingress_delay(CF_Microservice, guid, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
-        "app_name": CF_Microservice,
+        # "app_name": CF_Microservice,
+        "app_guid": guid,
         "selector": {
             "percentage": 50,
 
@@ -910,6 +1090,9 @@ def ingress_delay(CF_Microservice, guid, ZONE):
         begin_time = time.time()
         execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
 
+    time.sleep(5)
+
+    execution_finish_push_to_influx(CF_Microservice, guid)
 
 
 def loss(CF_Microservice, guid, ZONE):
@@ -920,7 +1103,8 @@ def loss(CF_Microservice, guid, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
-        "app_name": CF_Microservice,
+        # "app_name": CF_Microservice,
+        "app_guid": guid,
         "selector": {
             "percentage": 50,
 
@@ -993,6 +1177,10 @@ def loss(CF_Microservice, guid, ZONE):
         begin_time = time.time()
         execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
 
+    time.sleep(5)
+
+    execution_finish_push_to_influx(CF_Microservice, guid)
+
 
 def ingress_loss(CF_Microservice, guid, ZONE):
 
@@ -1002,7 +1190,8 @@ def ingress_loss(CF_Microservice, guid, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
-        "app_name": CF_Microservice,
+        # "app_name": CF_Microservice,
+        "app_guid": guid,
         "selector": {
             "percentage": 50,
 
@@ -1079,105 +1268,108 @@ def ingress_loss(CF_Microservice, guid, ZONE):
 
     while time.time() < (start_time + Chaos_Duration):
         begin_time = time.time()
-        execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
+
+    time.sleep(5)
+
+    execution_finish_push_to_influx(CF_Microservice, guid)
+
 
 def recurring_kill(CF_Microservice, guid, ZONE):
     # guid = get_app_guid(token, app)
     # mapping(guid, app)
-    no_of_execution = (execution_len(guid))
-    expected_executions = no_of_execution + 1
+    try:
+        no_of_execution = (execution_len(guid))
+        expected_executions = no_of_execution + 1
 
-    # utc_time = datetime.utcnow()
-    # print(f"the utc time now is - {utc_time}")
-    url = f"{chaos_url}/api/v1/tasks"
+        # utc_time = datetime.utcnow()
+        # print(f"the utc time now is - {utc_time}")
+        url = f"{chaos_url}/api/v1/tasks"
 
-    payload = json.dumps({
-        "app_name": CF_Microservice,
-        "selector": {
-            "percentage": 50,
-            "azs": [
-                ZONE
-            ]
-        },
-        "cron": f"*/{recurring_every} * * * *",
-        "kind": "KILL",
-        "repeatability": "RECURRING"
-    })
-    headers = {
-        'Authorization': f'Basic {chaos_auth}',
-        'Content-Type': 'application/json'
-    }
-
-    response = requests.request("POST", url, headers=headers, data=payload)
-
-    result = json.loads(response.text)
-
-    print(json.dumps(result, indent=4))
-
-    uuid = response.json()["uuid"]
-
-    print(uuid)
-
-    uuid_list.append(uuid)
-
-    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
-
-    infra_client.switch_database(f'{db_store}')
-    chaos_details = [
-        {
-            "measurement": "Chaos_Creation",
-            "tags": {
-                "CFMicroservice": CF_Microservice,
-                # "chaos_action": executions["kind"],
-                # "az": executions["selector"]["azs"][0],
-                # "IndexValue": executions["apps"][0]["instance"],
-                # "Execution_status": executions["apps"][0]["status"],
-                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                # "EndTime": converted_finish_time,
-                "BuildDetails": BuildDetails,
-                "IAAS": IAAS,
-                # "Performed_By": Performed_By,
-                # "Persona": Persona
-
+        payload = json.dumps({
+            # "app_name": CF_Microservice,
+            "app_guid": guid,
+            "selector": {
+                "percentage": 50,
+                "azs": [
+                    ZONE
+                ]
             },
-            "fields": {
-                "creation": str(result),
-                # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
-            }
+            "cron": f"*/{recurring_every} * * * *",
+            "kind": "KILL",
+            "repeatability": "RECURRING"
+        })
+        headers = {
+            'Authorization': f'Basic {chaos_auth}',
+            'Content-Type': 'application/json'
         }
-    ]
 
-    if infra_client.write_points(chaos_details, protocol='json'):
-        print("Chaos Data Insertion success")
-    else:
-        print("Chaos Data Insertion Failed")
-        print(chaos_details)
+        response = requests.request("POST", url, headers=headers, data=payload)
 
-    while no_of_execution != expected_executions:
-        # print("No other executions found")
-        no_of_execution = execution_len(guid)
+        result = json.loads(response.text)
+
+        print(json.dumps(result, indent=4))
+
+        uuid = response.json()["uuid"]
+
+        print(uuid)
+
+        uuid_list.append(uuid)
+
+        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+        infra_client.switch_database(f'{db_store}')
+        chaos_details = [
+            {
+                "measurement": "Chaos_Creation",
+                "tags": {
+                    "CFMicroservice": CF_Microservice,
+                    "BuildDetails": BuildDetails,
+                    "IAAS": IAAS
+                },
+                "fields": {
+                    "creation": str(result),
+                    # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                }
+            }
+        ]
+
+        if infra_client.write_points(chaos_details, protocol='json'):
+            print("Chaos Data Insertion success")
+        else:
+            print("Chaos Data Insertion Failed")
+            print(chaos_details)
+
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_data(guid, CF_Microservice)
+            end_time = time.time()
+            total_exec_time = end_time - begin_time
+            print(f"Total Execution time is - {total_exec_time}")
+            # print("App state - IMMEDIATELY post execution -")
+            # app_state(token, CF_Microservice, guid)
+            # time.sleep(sleep_time)
+            # print(f"App state {sleep_time}sec post execution -")
+            # app_state(token, CF_Microservice, guid)
+            time.sleep(((recurring_every * 60) + 2) - total_exec_time)
+            # mapping(guid, CF_Microservice)
+
         time.sleep(5)
 
-    start_time = time.time()
+        execution_finish_push_to_influx(CF_Microservice, guid)
 
-    while time.time() < (start_time + Chaos_Duration):
-        begin_time = time.time()
-        execution_data(guid, CF_Microservice)
-        end_time = time.time()
-        total_exec_time = end_time - begin_time
-        print(f"Total Execution time is - {total_exec_time}")
-        # print("App state - IMMEDIATELY post execution -")
-        # app_state(token, CF_Microservice, guid)
-        # time.sleep(sleep_time)
-        # print(f"App state {sleep_time}sec post execution -")
-        # app_state(token, CF_Microservice, guid)
-        time.sleep(((recurring_every * 60) + 2) - total_exec_time)
-        # mapping(guid, CF_Microservice)
-
-    delete_task(uuid, CF_Microservice)
-
-    print("The final mapping of all the instances are are below - \n")
-    mapping(guid, CF_Microservice)
+    finally:
+        delete_task(uuid, CF_Microservice)
+        time.sleep(20)
+        print("The final mapping of all the instances are as below - \n")
+        mapping(guid, CF_Microservice)
 
 
 if __name__ == '__main__':

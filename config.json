@@ -1,7 +1,7 @@
 {
   "AWS": {
     "influx_db": "hci-rit-prism-sel.cpis.c.eu-de-2.cloud.sap",
-    "db_store": "arpdb",
+    "db_store": "chaos_maz",
     "chaos_url": "https://chaosmonkey.cf.sap.hana.ondemand.com",
     "chaos_auth": "c2Jzc18rcGJnbmlvdjRpbGQxbGwydmp4dHVlbjl1dm90eXp6a3ZjdW1yenJtdG9jMXZnYmx6OWJlam11eDJtbGs2dXFncXYwPTphYV9EdFdCckRYL2ttdmY4cG5lR2diVHB4RDhHYTg9",
     "cf_oauth_url": "https://uaa.cf.sap.hana.ondemand.com",
