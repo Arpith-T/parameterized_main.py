@@ -623,7 +623,7 @@ def get_zone():
 
     print(app_dict)
 
-    # TODO - list all the apps availble in the zones
+    # Tlist all the apps availble in the zones
 
     # for app in app_list:
     #     if "z1" in app_dict["zones_of_" + app]:
@@ -651,7 +651,7 @@ def get_zone():
 
     print(f"\nz1={z1}\nz2={z2}\nz3={z3}\n")
 
-    # # TODO - REMOVING DUPLICATES - https://stackoverflow.com/questions/7961363/removing-duplicates-in-lists
+    # # REMOVING DUPLICATES - https://stackoverflow.com/questions/7961363/removing-duplicates-in-lists
     #
     # print("The final list after removing the duplicates, if any is as below- \n")
     # print(f"z1 = {list(dict.fromkeys(z1))}")
@@ -663,7 +663,7 @@ def get_zone():
     # z2 = list(dict.fromkeys(z2))
     # z3 = list(dict.fromkeys(z3))
 
-    # TODO - Selecting the zone where all MTMS are present.
+    # Selecting the zone where all MTMS are present.
 
     if len(z1) == len(app_array):
         print("we will select 'z1' for chaos action")
