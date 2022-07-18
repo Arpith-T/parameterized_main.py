@@ -231,35 +231,6 @@ def get_process_guid(guid, app, token):
     return process_guid
 
 
-# def instance_state(token, app, guid, instance_impacted):
-#     # global instance_status
-#     if instance_impacted == "No_Instance_Available":
-#         instance_status == "NA"
-#         print(f"Instance state is {instance_status}")
-#         return instance_status
-#     else:
-#         process_guid = get_process_guid(guid, app, token)
-#         url = f"{cf_base_url}/v3/processes/{process_guid}/stats"
-#
-#         payload = {}
-#         headers = {
-#             'Authorization': f'Bearer {token}'
-#         }
-#
-#         response = requests.request("GET", url, headers=headers, data=payload)
-#
-#         # print(response.json())
-#         try:
-#             number_of_instances = len(response.json()["resources"])
-#             print(f"Number of instances in '{app}' is  - '{number_of_instances}'")
-#         except:
-#             pass
-#         try:
-#             instance_status = response.json()['resources'][instance_impacted]['state']
-#             print(f"instance status is - {instance_status}")
-#         except:
-#             return instance_status
-
 def instance_state(token, app, guid, instance_impacted):
     global instance_status
     process_guid = get_process_guid(guid, app, token)
@@ -284,9 +255,6 @@ def instance_state(token, app, guid, instance_impacted):
         return instance_status
     except:
         return None
-
-
-
 
 def execution_len(guid):
     url = f"{chaos_url}/api/v1/apps/{guid}/executions"
@@ -405,41 +373,7 @@ def execution_data(guid, app):
                 while instance_status != "RUNNING" and instance_status == "NA":
                     instance_status = instance_state(token, app, guid, instance_impacted)
                     time.sleep(1)
-                #     infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
-                #     infra_client.switch_database(f'{db_store}')
-                #     chaos_details = [
-                #         {
-                #             "measurement": "MultiMTMS_Recurring_kill",
-                #             "tags": {
-                #                 "CFMicroservice": executions["MTMS"],
-                #                 "chaos_action": executions["kind"],
-                #                 "az": executions["selector"]["azs"][0],
-                #                 "IndexValue": executions["apps"][0]["instance"],
-                #                 "Execution_status": executions["apps"][0]["status"],
-                #                 # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                #                 "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
-                #                 "BuildDetails": BuildDetails,
-                #                 "IAAS": IAAS
-                #             },
-                #             "fields": {
-                #                 # "execution_data": str(executions),
-                #                 "chaos": 1  # we will need to figure out as to what we need to add here and use it better
-                #             }
-                #         }
-                #     ]
-                #     # print(chaos_details)
-                #
-                #     if infra_client.write_points(chaos_details, protocol='json'):
-                #         print("Chaos Data Insertion success")
-                #         instance_status = instance_state(token, app, guid, instance_impacted)
-                #         print(f"Instance status is - {instance_status}")
-                #     else:
-                #         print("Chaos Data Insertion Failed")
-                #         print(chaos_details)
-                #         instance_status = instance_state(token, app, guid, instance_impacted)
-                #
-                # print("Instance is RUNNING")
-                # finish_time = time.localtime()
+
                 finish_time = datetime.utcnow()
                 print(f"The finish time is - {finish_time}")
                 # converted_finish_time = time.strftime("%H:%M:%S", finish_time)
@@ -527,25 +461,6 @@ def execution_data(guid, app):
 
             print("Instance is RUNNING")
 
-            # print(f"\n{executions}")
-            #
-            # try:
-            #     print(f"no - of executions for '{app} -'{len(executions)}'")
-            # except: pass
-            #
-            # return executions
-
-            # execution_status = response.json()[0]["apps"][0]["status"]
-
-            # print(execution_status)
-
-            # if execution_status == "FAILED":
-            #     print(f"No instance of {app} exists in {ZONE}")
-            #     print(f"The current mapping of instances are as below:\n{mapping()}")
-            #     return execution_status
-            # else:
-            #     time.sleep(360)
-            #     return execution_status
 
 
 def delete_task(uuid, app):
@@ -623,21 +538,6 @@ def get_zone():
 
     print(app_dict)
 
-    # Tlist all the apps availble in the zones
-
-    # for app in app_list:
-    #     if "z1" in app_dict["zones_of_" + app]:
-    #         z1.append(app)
-    #     else:
-    #         continue
-    #     if "z2" in app_dict["zones_of_" + app]:
-    #         z2.append(app)
-    #     else:
-    #         continue
-    #     if "z3" in app_dict["zones_of_" + app]:
-    #         z3.append(app)
-    #
-    # print(f"\n{z1}\n{z2}\n{z3}\n")
 
     for app in app_array:
         if "z1" in app_dict["zones_of_" + app]:
@@ -806,11 +706,6 @@ def execution_finish_push_to_influx(app, guid):
             "tags": {
                 "CFMicroservice": app_impacted,
                 "chaos_action": chaos_action_performed,
-                # "BuildDetails": BuildDetails,
-                # "IAAS": IAAS,
-                # "Performed_By": Performed_By,
-                # "Persona": Persona
-                #Status = "running"
 
             },
             "fields": {
@@ -1522,23 +1417,6 @@ if __name__ == '__main__':
         print(guid_list)
         p1.close()
         p1.join()
-
-        # p2 = Pool()
-        # mapping_pool = p2.starmap(mapping, zip(guid_list, app_array))
-        # p2.close()
-        # p2.join()
-        #
-        # p3 = Pool()
-        # app_state_pool = p3.starmap(app_state, zip(repeat(token), app_array, guid_list))
-        # p3.close()
-        # p3.join()
-
-        # ZONE = get_zone()
-
-        # p4 = Pool()
-        # result = p4.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
-        # p4.close()
-        # p4.join()
 
         m = mp.Manager()
         memorizedPaths = m.dict()
