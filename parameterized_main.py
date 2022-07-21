@@ -32,7 +32,7 @@ LATENCY = 1000
 Chaos_Duration = 60
 LOSS_PERCENTAGE = 25
 recurring_every = 4
-app_list = ["it-op-b2b-api","it-op-rest"]
+app_list = []
 # Chaos_Action = "LOSS"
 Chaos_Action = "DELAY"
 # Chaos_Action = "RECURRING_KILL"
@@ -462,7 +462,6 @@ def execution_data(guid, app):
                     print(chaos_details)
 
             print("Instance is RUNNING")
-
 
 
 def delete_task(uuid, app):
@@ -1306,165 +1305,167 @@ if __name__ == '__main__':
         app_array = app_list + worker_list
     except:
         app_array = worker_list  # when there are no MTMS entered only worker list needs to be taken and executed
-
+    if len(app_array) == 0:
+        print("ERROR: You have not passed any application to perform a chaos action on.")
     # time.sleep(60)
     # time.sleep(WAIT_TIME)
-    try:
-        ZONE = get_zone()
-    except:
-        print("unable to fetch proper zone due to GUID related issues. reach out to infra for rootcause")
+    else:
+        try:
+            ZONE = get_zone()
+        except:
+            print("unable to fetch proper zone due to GUID related issues. reach out to infra for rootcause")
 
 
-    t1 = time.time()
+        t1 = time.time()
 
-    if Chaos_Action == "DELAY":
-        p1 = mp.Pool()
-        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                 app_array))
-        print(guid_list)
-        p1.close()
-        p1.join()
+        if Chaos_Action == "DELAY":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))
+            print(guid_list)
+            p1.close()
+            p1.join()
 
-        time.sleep(WAIT_TIME)
+            time.sleep(WAIT_TIME)
 
-        m = mp.Manager()
-        memorizedPaths = m.dict()
-        filepaths = m.dict()
-        cutoff = 1  ##
-        # use all available CPUs
-        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                       filepaths,
-                                                       cutoff))
-        degreelist = range(1)  ##
-        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            try:
-                result = p.starmap(delay, zip(app_array, guid_list, repeat(ZONE)))
-            except NameError as e:
-                print(e)
-                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-        p.close()
-        p.join()
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(delay, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError as e:
+                    print(e)
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
 
-    elif Chaos_Action == "KILL":
-        time.sleep(WAIT_TIME)
-        p = Pool()
-        result = p.starmap(crash, zip(app_array, repeat(ZONE)))
-        p.close()
-        p.join()
-    elif Chaos_Action == "SCALE":
-        time.sleep(WAIT_TIME)
-        p = Pool()
-        result = p.map(app_scaling, app_array)
-        p.close()
-        p.join()
+        elif Chaos_Action == "KILL":
+            time.sleep(WAIT_TIME)
+            p = Pool()
+            result = p.starmap(crash, zip(app_array, repeat(ZONE)))
+            p.close()
+            p.join()
+        elif Chaos_Action == "SCALE":
+            time.sleep(WAIT_TIME)
+            p = Pool()
+            result = p.map(app_scaling, app_array)
+            p.close()
+            p.join()
 
-    elif Chaos_Action == "LOSS":
-        p1 = mp.Pool()
-        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                 app_array))
-        print(guid_list)
-        p1.close()
-        p1.join()
+        elif Chaos_Action == "LOSS":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))
+            print(guid_list)
+            p1.close()
+            p1.join()
 
-        time.sleep(WAIT_TIME)
+            time.sleep(WAIT_TIME)
 
-        m = mp.Manager()
-        memorizedPaths = m.dict()
-        filepaths = m.dict()
-        cutoff = 1  ##
-        # use all available CPUs
-        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                       filepaths,
-                                                       cutoff))
-        degreelist = range(1)  ##
-        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            try:
-                result = p.starmap(loss, zip(app_array, guid_list, repeat(ZONE)))
-            except NameError as e:
-                print(e)
-                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-        p.close()
-        p.join()
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(loss, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError as e:
+                    print(e)
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
 
-    elif Chaos_Action == "INGRESS_LOSS":
-        p1 = mp.Pool()
-        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                 app_array))
-        print(guid_list)
-        p1.close()
-        p1.join()
+        elif Chaos_Action == "INGRESS_LOSS":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))
+            print(guid_list)
+            p1.close()
+            p1.join()
 
-        time.sleep(WAIT_TIME)
+            time.sleep(WAIT_TIME)
 
-        m = mp.Manager()
-        memorizedPaths = m.dict()
-        filepaths = m.dict()
-        cutoff = 1  ##
-        # use all available CPUs
-        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                       filepaths,
-                                                       cutoff))
-        degreelist = range(1)  ##
-        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            try:
-                result = p.starmap(ingress_loss, zip(app_array, guid_list, repeat(ZONE)))
-            except NameError :
-                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-        p.close()
-        p.join()
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(ingress_loss, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError :
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
 
-    elif Chaos_Action == "INGRESS_DELAY":
-        p1 = mp.Pool()
-        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                 app_array))
-        print(guid_list)
-        p1.close()
-        p1.join()
+        elif Chaos_Action == "INGRESS_DELAY":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))
+            print(guid_list)
+            p1.close()
+            p1.join()
 
-        time.sleep(WAIT_TIME)
+            time.sleep(WAIT_TIME)
 
-        m = mp.Manager()
-        memorizedPaths = m.dict()
-        filepaths = m.dict()
-        cutoff = 1  ##
-        # use all available CPUs
-        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                       filepaths,
-                                                       cutoff))
-        degreelist = range(1)  ##
-        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            try:
-                result = p.starmap(ingress_delay, zip(app_array, guid_list, repeat(ZONE)))
-            except NameError as e:
-                print(e)
-                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-        p.close()
-        p.join()
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(ingress_delay, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError as e:
+                    print(e)
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
 
 
-    elif Chaos_Action == "RECURRING_KILL":
-        p1 = mp.Pool()
-        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                 app_array))  # https://stackoverflow.com/questions/5442910/how-to-use-multiprocessing-pool-map-with-multiple-arguments
-        print(guid_list)
-        p1.close()
-        p1.join()
+        elif Chaos_Action == "RECURRING_KILL":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))  # https://stackoverflow.com/questions/5442910/how-to-use-multiprocessing-pool-map-with-multiple-arguments
+            print(guid_list)
+            p1.close()
+            p1.join()
 
-        m = mp.Manager()
-        memorizedPaths = m.dict()
-        filepaths = m.dict()
-        cutoff = 1  ##
-        # use all available CPUs
-        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                       filepaths,
-                                                       cutoff))
-        degreelist = range(1)  ##
-        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            try:
-                result = p.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
-            except NameError as e:
-                print(e)
-                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-        p.close()
-        p.join()
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError as e:
+                    print(e)
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
 
