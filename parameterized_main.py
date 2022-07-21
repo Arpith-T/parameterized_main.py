@@ -29,13 +29,13 @@ from itertools import repeat
 # WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
 LATENCY = 1000
-Chaos_Duration = 480
+Chaos_Duration = 60
 LOSS_PERCENTAGE = 25
 recurring_every = 4
-app_list = ["it-op-jobs","it-op-odata","it-app","it-app-prov"]
+app_list = ["it-op-b2b-api","it-op-rest"]
 # Chaos_Action = "LOSS"
-# Chaos_Action = "DELAY"
-Chaos_Action = "RECURRING_KILL"
+Chaos_Action = "DELAY"
+# Chaos_Action = "RECURRING_KILL"
 # Chaos_Action = "INGRESS_DELAY"
 # Chaos_Action = "INGRESS_LOSS"
 # Chaos_Action = "KILL"
@@ -44,7 +44,7 @@ PASSWORD = "Prisminfra529#5"
 tenant_name = ""
 # tenant_name = "awsiatmaz-02"
 BuildDetails = "test"
-IAAS = "AWS"
+IAAS = "AZURE"
 # Performed_By = "Ather"
 # Persona = "design"
 WAIT_TIME = 0
@@ -106,9 +106,6 @@ def trm_token():
 
     response = requests.request("GET", url, headers=headers, data=payload, files=files)
 
-    # print(response.text)
-    # print("\n")
-    # print(type(response.text))
     res_in_dict = json.loads(response.text)
     return res_in_dict["access_token"]
 
@@ -191,8 +188,10 @@ def get_app_guid(token, app):
     except:
         print(f"\n unable to fetch guid for {app}. There might couple of reasons for this - \n"
               f"1. Software Update might be in progress Or\n"
-              f"2. There might be some deployment issue due to which there might be some duplication of applications."
-              f"Please contact Infra team to understand the root cause and resolution for the same")
+              f"2. There might be some deployment issue due to which there might be some duplication of applications.\n"
+              f"3. Application name might be incorrect\n"
+              f"Please contact Infra team to understand the root cause and resolution for the same"
+              )
 
 
 # guid = get_app_guid()
@@ -215,20 +214,22 @@ def get_process_guid(guid, app, token):
     consider guid picked from the above api as proper guid to get instance/process info.
     Hence, we need to futher filter it to get the guid within the process. to standardize the process we are using it for all apps and see how it works """
 
+    try:
+        process_url = f"{cf_base_url}/v3/apps/{guid}/processes"
 
-    process_url = f"{cf_base_url}/v3/apps/{guid}/processes"
+        payload = {}
+        headers = {
+            'Authorization': f'Bearer {token}'
+            # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
+        }
 
-    payload = {}
-    headers = {
-        'Authorization': f'Bearer {token}'
-        # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
-    }
+        process_response = requests.request("GET", process_url, headers=headers, data=payload).json()
 
-    process_response = requests.request("GET", process_url, headers=headers, data=payload).json()
+        process_guid = process_response["resources"][0]["guid"]
 
-    process_guid = process_response["resources"][0]["guid"]
-
-    return process_guid
+        return process_guid
+    except:
+        print("unable to get process guid. check with infra as what might be the issue here.")
 
 
 def instance_state(token, app, guid, instance_impacted):
@@ -254,6 +255,7 @@ def instance_state(token, app, guid, instance_impacted):
         print(f"instance status is - {instance_status}")
         return instance_status
     except:
+        print("unable to fetch instance state")
         return None
 
 def execution_len(guid):
@@ -847,17 +849,8 @@ def delay(CF_Microservice, guid, ZONE):
             "measurement": "Chaos_Creation",
             "tags": {
                 "CFMicroservice": CF_Microservice,
-                # "chaos_action": executions["kind"],
-                # "az": executions["selector"]["azs"][0],
-                # "IndexValue": executions["apps"][0]["instance"],
-                # "Execution_status": executions["apps"][0]["status"],
-                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                # "EndTime": converted_finish_time,
                 "BuildDetails": BuildDetails,
-                "IAAS": IAAS,
-                # "Performed_By": Performed_By,
-                # "Persona": Persona
-
+                "IAAS": IAAS
             },
             "fields": {
                 "creation": str(result),
@@ -872,29 +865,31 @@ def delay(CF_Microservice, guid, ZONE):
         print("Chaos Data Insertion Failed")
         print(chaos_details)
 
-    # guid = get_app_guid(token, CF_Microservice)
-    #
-    # print(f"The guid for '{CF_Microservice}' is '{guid}'")
-    #
-    # time.sleep(Chaos_Duration + 90)
+    # Check if ther is no parallel execution happening on the same microservice
+    result_json = response.json()
+    try:
+        result_json["status"] == "Created"
+    except KeyError as e:
+        print(f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+    else: # If there is no parallel execution. we proceed further for with the executions
 
-    while no_of_execution != expected_executions:
-        # print("No other executions found")
-        no_of_execution = execution_len(guid)
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        # app_state(token, CF_Microservice, guid)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+
         time.sleep(5)
 
-    # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
-    # app_state(token, CF_Microservice, guid)
-
-    start_time = time.time()
-
-    while time.time() < (start_time + Chaos_Duration):
-        begin_time = time.time()
-        execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
-
-    time.sleep(5)
-
-    execution_finish_push_to_influx(CF_Microservice,guid)
+        execution_finish_push_to_influx(CF_Microservice,guid)
 
 
 def ingress_delay(CF_Microservice, guid, ZONE):
@@ -940,17 +935,8 @@ def ingress_delay(CF_Microservice, guid, ZONE):
             "measurement": "Chaos_Creation",
             "tags": {
                 "CFMicroservice": CF_Microservice,
-                # "chaos_action": executions["kind"],
-                # "az": executions["selector"]["azs"][0],
-                # "IndexValue": executions["apps"][0]["instance"],
-                # "Execution_status": executions["apps"][0]["status"],
-                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                # "EndTime": converted_finish_time,
                 "BuildDetails": BuildDetails,
-                "IAAS": IAAS,
-                # "Performed_By": Performed_By,
-                # "Persona": Persona
-
+                "IAAS": IAAS
             },
             "fields": {
                 "creation": str(result),
@@ -965,29 +951,31 @@ def ingress_delay(CF_Microservice, guid, ZONE):
         print("Chaos Data Insertion Failed")
         print(chaos_details)
 
-    # guid = get_app_guid(token, CF_Microservice)
-    #
-    # print(f"The guid for '{CF_Microservice}' is '{guid}'")
-    #
-    # time.sleep(Chaos_Duration + 90)
+    # Check if ther is no parallel execution happening on the same microservice
+    result_json = response.json()
+    try:
+        result_json["status"] == "Created"
+    except KeyError as e:
+        print(f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+    else: # If there is no parallel execution. we proceed further for with the executions
 
-    while no_of_execution != expected_executions:
-        # print("No other executions found")
-        no_of_execution = execution_len(guid)
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        # app_state(token, CF_Microservice, guid)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+
         time.sleep(5)
 
-    # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
-    # app_state(token, CF_Microservice, guid)
-
-    start_time = time.time()
-
-    while time.time() < (start_time + Chaos_Duration):
-        begin_time = time.time()
-        execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
-
-    time.sleep(5)
-
-    execution_finish_push_to_influx(CF_Microservice, guid)
+        execution_finish_push_to_influx(CF_Microservice, guid)
 
 
 def loss(CF_Microservice, guid, ZONE):
@@ -1058,23 +1046,32 @@ def loss(CF_Microservice, guid, ZONE):
         print("Chaos Data Insertion Failed")
         print(chaos_details)
 
-    while no_of_execution != expected_executions:
-        # print("No other executions found")
-        no_of_execution = execution_len(guid)
+    # Check if ther is no parallel execution happening on the same microservice
+    result_json = response.json()
+    try:
+        result_json["status"] == "Created"
+    except KeyError as e:
+        print(f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+    else: # If there is no parallel execution. we proceed further for with the executions
+
+
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        # app_state(token, CF_Microservice, guid)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
+
         time.sleep(5)
 
-    # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
-    # app_state(token, CF_Microservice, guid)
-
-    start_time = time.time()
-
-    while time.time() < (start_time + Chaos_Duration):
-        begin_time = time.time()
-        execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
-
-    time.sleep(5)
-
-    execution_finish_push_to_influx(CF_Microservice, guid)
+        execution_finish_push_to_influx(CF_Microservice, guid)
 
 
 def ingress_loss(CF_Microservice, guid, ZONE):
@@ -1145,29 +1142,32 @@ def ingress_loss(CF_Microservice, guid, ZONE):
         print("Chaos Data Insertion Failed")
         print(chaos_details)
 
-    # guid = get_app_guid(token, CF_Microservice)
-    #
-    # print(f"The guid for '{CF_Microservice}' is '{guid}'")
-    #
-    # time.sleep(Chaos_Duration + 90)
+        # Check if ther is no parallel execution happening on the same microservice
+    result_json = response.json()
+    try:
+        result_json["status"] == "Created"
+    except KeyError as e:
+        print(
+            f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+    else:  # If there is no parallel execution. we proceed further for with the executions
 
-    while no_of_execution != expected_executions:
-        # print("No other executions found")
-        no_of_execution = execution_len(guid)
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        # app_state(token, CF_Microservice, guid)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
+
         time.sleep(5)
 
-    # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
-    # app_state(token, CF_Microservice, guid)
-
-    start_time = time.time()
-
-    while time.time() < (start_time + Chaos_Duration):
-        begin_time = time.time()
-        execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
-
-    time.sleep(5)
-
-    execution_finish_push_to_influx(CF_Microservice, guid)
+        execution_finish_push_to_influx(CF_Microservice, guid)
 
 
 def recurring_kill(CF_Microservice, guid, ZONE):
@@ -1235,36 +1235,49 @@ def recurring_kill(CF_Microservice, guid, ZONE):
             print("Chaos Data Insertion Failed")
             print(chaos_details)
 
-        while no_of_execution != expected_executions:
-            # print("No other executions found")
-            no_of_execution = execution_len(guid)
+            # Check if ther is no parallel execution happening on the same microservice
+        result_json = response.json()
+        try:
+            result_json["status"] == "Created"
+        except KeyError as e:
+            print(
+                f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+        else:  # If there is no parallel execution. we proceed further for with the executions
+
+            while no_of_execution != expected_executions:
+                # print("No other executions found")
+                no_of_execution = execution_len(guid)
+                time.sleep(5)
+
+            start_time = time.time()
+
+            while time.time() < (start_time + Chaos_Duration):
+                begin_time = time.time()
+                execution_data(guid, CF_Microservice)
+                end_time = time.time()
+                total_exec_time = end_time - begin_time
+                print(f"Total Execution time is - {total_exec_time}")
+                # print("App state - IMMEDIATELY post execution -")
+                # app_state(token, CF_Microservice, guid)
+                # time.sleep(sleep_time)
+                # print(f"App state {sleep_time}sec post execution -")
+                # app_state(token, CF_Microservice, guid)
+                time.sleep(((recurring_every * 60) + 2) - total_exec_time)
+                # mapping(guid, CF_Microservice)
+
             time.sleep(5)
 
-        start_time = time.time()
-
-        while time.time() < (start_time + Chaos_Duration):
-            begin_time = time.time()
-            execution_data(guid, CF_Microservice)
-            end_time = time.time()
-            total_exec_time = end_time - begin_time
-            print(f"Total Execution time is - {total_exec_time}")
-            # print("App state - IMMEDIATELY post execution -")
-            # app_state(token, CF_Microservice, guid)
-            # time.sleep(sleep_time)
-            # print(f"App state {sleep_time}sec post execution -")
-            # app_state(token, CF_Microservice, guid)
-            time.sleep(((recurring_every * 60) + 2) - total_exec_time)
-            # mapping(guid, CF_Microservice)
-
-        time.sleep(5)
-
-        execution_finish_push_to_influx(CF_Microservice, guid)
+            execution_finish_push_to_influx(CF_Microservice, guid)
 
     finally:
-        delete_task(uuid, CF_Microservice)
-        time.sleep(20)
-        print("The final mapping of all the instances are as below - \n")
-        mapping(guid, CF_Microservice)
+        try:
+            delete_task(uuid, CF_Microservice)
+        except:
+            pass # We need to get the task info here automatically if it has failed
+        finally:
+            time.sleep(20)
+            print("The final mapping of all the instances are as below - \n")
+            mapping(guid, CF_Microservice)
 
 
 if __name__ == '__main__':
@@ -1272,7 +1285,7 @@ if __name__ == '__main__':
     config = read_config()
 
     if tenant_name == "":
-        print("No Tenant selected for chaos action")
+        print("No Tenant selected for chaos action.chaos action wil be performed only on MTMS")
         app_array = app_list  # when no worker is selected, only MTMS should be executed
         print(app_array)
     else:
@@ -1296,7 +1309,11 @@ if __name__ == '__main__':
 
     # time.sleep(60)
     # time.sleep(WAIT_TIME)
-    ZONE = get_zone()
+    try:
+        ZONE = get_zone()
+    except:
+        print("unable to fetch proper zone due to GUID related issues. reach out to infra for rootcause")
+
 
     t1 = time.time()
 
@@ -1320,7 +1337,11 @@ if __name__ == '__main__':
                                                        cutoff))
         degreelist = range(1)  ##
         for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            result = p.starmap(delay, zip(app_array, guid_list, repeat(ZONE)))
+            try:
+                result = p.starmap(delay, zip(app_array, guid_list, repeat(ZONE)))
+            except NameError as e:
+                print(e)
+                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
         p.close()
         p.join()
 
@@ -1357,7 +1378,11 @@ if __name__ == '__main__':
                                                        cutoff))
         degreelist = range(1)  ##
         for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            result = p.starmap(loss, zip(app_array, guid_list, repeat(ZONE)))
+            try:
+                result = p.starmap(loss, zip(app_array, guid_list, repeat(ZONE)))
+            except NameError as e:
+                print(e)
+                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
         p.close()
         p.join()
 
@@ -1381,7 +1406,10 @@ if __name__ == '__main__':
                                                        cutoff))
         degreelist = range(1)  ##
         for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            result = p.starmap(ingress_loss, zip(app_array, guid_list, repeat(ZONE)))
+            try:
+                result = p.starmap(ingress_loss, zip(app_array, guid_list, repeat(ZONE)))
+            except NameError :
+                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
         p.close()
         p.join()
 
@@ -1405,7 +1433,11 @@ if __name__ == '__main__':
                                                        cutoff))
         degreelist = range(1)  ##
         for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            result = p.starmap(ingress_delay, zip(app_array, guid_list, repeat(ZONE)))
+            try:
+                result = p.starmap(ingress_delay, zip(app_array, guid_list, repeat(ZONE)))
+            except NameError as e:
+                print(e)
+                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
         p.close()
         p.join()
 
@@ -1428,7 +1460,11 @@ if __name__ == '__main__':
                                                        cutoff))
         degreelist = range(1)  ##
         for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            result = p.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
+            try:
+                result = p.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
+            except NameError as e:
+                print(e)
+                print("unable to fetch the correct zone check if we are able to get the GUID of the app")
         p.close()
         p.join()
 
