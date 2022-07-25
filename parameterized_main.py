@@ -32,10 +32,10 @@ LATENCY = 1000
 Chaos_Duration = 60
 LOSS_PERCENTAGE = 25
 recurring_every = 4
-app_list = []
+app_list = ["it-op-jobs"]
 # Chaos_Action = "LOSS"
-Chaos_Action = "DELAY"
-# Chaos_Action = "RECURRING_KILL"
+# Chaos_Action = "DELAY"
+Chaos_Action = "RECURRING_KILL"
 # Chaos_Action = "INGRESS_DELAY"
 # Chaos_Action = "INGRESS_LOSS"
 # Chaos_Action = "KILL"
@@ -44,7 +44,7 @@ PASSWORD = "Prisminfra529#5"
 tenant_name = ""
 # tenant_name = "awsiatmaz-02"
 BuildDetails = "test"
-IAAS = "AZURE"
+IAAS = "AWS"
 # Performed_By = "Ather"
 # Persona = "design"
 WAIT_TIME = 0
@@ -1197,14 +1197,33 @@ def recurring_kill(CF_Microservice, guid, ZONE):
             'Authorization': f'Basic {chaos_auth}',
             'Content-Type': 'application/json'
         }
+        try:
+            response = requests.request("POST", url, headers=headers, data=payload)
 
-        response = requests.request("POST", url, headers=headers, data=payload)
+            result = json.loads(response.text)
 
-        result = json.loads(response.text)
+            print(json.dumps(result, indent=4))
+        except json.JSONDecodeError:
+            print("Empty response to try again")
+            time.sleep(2)
+            try:
+                result = json.loads(response.text)
 
-        print(json.dumps(result, indent=4))
+                print(json.dumps(result, indent=4))
+            except json.JSONDecodeError as e:
+                return f"{e} - API is not retuening proper response"
 
-        uuid = response.json()["uuid"]
+
+        try:
+            uuid = response.json()["uuid"]
+        except KeyError as e:
+            print(e)
+            print("sleep for 2 seconds and try again")
+            try:
+                uuid = response.json()["uuid"]
+            except KeyError as e :
+                print(f"{e} - task might not be getting created please check in the dashboard or API")
+                return 0
 
         print(uuid)
 
