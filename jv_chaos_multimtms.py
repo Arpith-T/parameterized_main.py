@@ -324,7 +324,7 @@ def execution_data(guid, app):
                         "az": executions["selector"]["azs"][0],
                         # "IndexValue": executions["apps"][0]["instance"],
                         "IndexValue": None,
-                        "Execution_status": FAILED,
+                        "Execution_status": "FAILED",
                         # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                         "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
                         "EndTime": None,
@@ -1346,13 +1346,13 @@ if __name__ == '__main__':
 
         elif Chaos_Action == "KILL":
             time.sleep(WAIT_TIME)
-            p = Pool()
+            p = mp.Pool()
             result = p.starmap(crash, zip(app_array, repeat(ZONE)))
             p.close()
             p.join()
         elif Chaos_Action == "SCALE":
             time.sleep(WAIT_TIME)
-            p = Pool()
+            p = mp.Pool()
             result = p.map(app_scaling, app_array)
             p.close()
             p.join()
