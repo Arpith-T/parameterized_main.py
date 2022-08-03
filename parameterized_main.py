@@ -29,10 +29,10 @@ from itertools import repeat
 # WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
 LATENCY = 1000
-Chaos_Duration = 60
+Chaos_Duration = 900
 LOSS_PERCENTAGE = 25
 recurring_every = 4
-app_list = ["it-op-jobs"]
+app_list = ["it-op-jobs", "it-op-consumer","it-op-odata"]
 # Chaos_Action = "LOSS"
 # Chaos_Action = "DELAY"
 Chaos_Action = "RECURRING_KILL"
@@ -40,7 +40,7 @@ Chaos_Action = "RECURRING_KILL"
 # Chaos_Action = "INGRESS_LOSS"
 # Chaos_Action = "KILL"
 # Chaos_Action = "SCALE"
-PASSWORD = "Prisminfra529#5"
+
 tenant_name = ""
 # tenant_name = "awsiatmaz-02"
 BuildDetails = "test"
