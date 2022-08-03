@@ -14,7 +14,7 @@ from itertools import repeat
 IAAS = os.getenv("IAAS")
 LATENCY = int(os.getenv("LATENCY"))
 LOSS_PERCENTAGE = int(os.getenv("LOSS_PERCENTAGE"))
-DURATION = int(os.getenv("DURATION"))
+Chaos_Duration = int(os.getenv("Chaos_Duration"))
 recurring_every = int(os.getenv("recurring_every"))
 app_string = os.getenv("CF_Microservice")
 try:
@@ -25,7 +25,7 @@ except:
 Chaos_Action = os.getenv("Chaos_Action")
 PASSWORD = os.getenv("PASSWORD")
 tenant_name = os.getenv("TENANT")
-BuildDetail = os.getenv("BuildReport")
+BuildDetails = os.getenv("BuildReport")
 WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
 
@@ -34,6 +34,7 @@ worker_list = []
 uuid_list = []
 list_of_executions = []
 list_of_guids = []
+list_of_process_guids = [] # to get the process/instance state - this will handle it-rootwebapp exception
 
 ### multiprocessing with all the cores #####
 # Refer - https://stackoverflow.com/questions/19086106/how-to-utilize-all-cores-with-python-multiprocessing
@@ -73,7 +74,6 @@ trm_basic_auth = json.dumps(config[IAAS]['trm_basic_auth']).strip('\"')
 influx_db = json.dumps(config[IAAS]['influx_db']).strip('\"')
 db_store = json.dumps(config[IAAS]['db_store']).strip('\"')
 
-
 def trm_token():
     url = f"{trm_oauth_url}?grant_type=client_credentials"
 
@@ -85,9 +85,6 @@ def trm_token():
 
     response = requests.request("GET", url, headers=headers, data=payload, files=files)
 
-    # print(response.text)
-    # print("\n")
-    # print(type(response.text))
     res_in_dict = json.loads(response.text)
     return res_in_dict["access_token"]
 
@@ -123,6 +120,13 @@ def utc_to_ist(utc):
     # print(IST)
     return IST
 
+def date_symmetry(utc):
+    timestamp = datetime.strptime(utc, '%Y-%m-%dT%H:%M:%S')
+    # print(utc)
+    # IST = timestamp + timedelta(hours=5, minutes=30)
+    # print(IST)
+    # return IST
+    return timestamp
 
 def cf_oauth_token():
     url = f"{cf_oauth_url}/oauth/token"
@@ -143,20 +147,30 @@ def cf_oauth_token():
 token = cf_oauth_token()
 
 
+
+
 def get_app_guid(token, app):
-    url = f"{cf_base_url}/v3/apps?page=1&per_page=1000&space_guids={space_id}&names={app}"
+    try:
+        url = f"{cf_base_url}/v3/apps?page=1&per_page=1000&space_guids={space_id}&names={app}"
 
-    payload = {}
-    headers = {
-        'Authorization': f'Bearer {token}'
-        # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
-    }
+        payload = {}
+        headers = {
+            'Authorization': f'Bearer {token}'
+            # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
+        }
 
-    response = requests.request("GET", url, headers=headers, data=payload)
+        response = requests.request("GET", url, headers=headers, data=payload)
 
-    guid = json.loads(response.text)["resources"][0]["guid"]
+        guid = json.loads(response.text)["resources"][0]["guid"]
 
-    return guid
+        return guid
+    except:
+        print(f"\n unable to fetch guid for {app}. There might couple of reasons for this - \n"
+              f"1. Software Update might be in progress Or\n"
+              f"2. There might be some deployment issue due to which there might be some duplication of applications.\n"
+              f"3. Application name might be incorrect\n"
+              f"Please contact Infra team to understand the root cause and resolution for the same"
+              )
 
 
 # guid = get_app_guid()
@@ -174,9 +188,33 @@ def mapping(guid, app):
     print(f"\nfor '{app}'\n{response.json()}")
 
 
+def get_process_guid(guid, app, token):
+    """ NOTE - the below process is done to handle a scenario where it-rootwebapp does not
+    consider guid picked from the above api as proper guid to get instance/process info.
+    Hence, we need to futher filter it to get the guid within the process. to standardize the process we are using it for all apps and see how it works """
+
+    try:
+        process_url = f"{cf_base_url}/v3/apps/{guid}/processes"
+
+        payload = {}
+        headers = {
+            'Authorization': f'Bearer {token}'
+            # 'Cookie': 'JTENANTSESSIONID_kr19bxkapa=FPtRDK1dM3D1lD56pq9oAq9mvHn19ohxqXjClhqrbLI%3D'
+        }
+
+        process_response = requests.request("GET", process_url, headers=headers, data=payload).json()
+
+        process_guid = process_response["resources"][0]["guid"]
+
+        return process_guid
+    except:
+        print("unable to get process guid. check with infra as what might be the issue here.")
+
+
 def instance_state(token, app, guid, instance_impacted):
     global instance_status
-    url = f"{cf_base_url}/v3/processes/{guid}/stats"
+    process_guid = get_process_guid(guid, app, token)
+    url = f"{cf_base_url}/v3/processes/{process_guid}/stats"
 
     payload = {}
     headers = {
@@ -193,11 +231,11 @@ def instance_state(token, app, guid, instance_impacted):
         pass
     try:
         instance_status = response.json()['resources'][instance_impacted]['state']
+        print(f"instance status is - {instance_status}")
+        return instance_status
     except:
-        pass
-
-    return instance_status
-
+        print("unable to fetch instance state")
+        return None
 
 def execution_len(guid):
     url = f"{chaos_url}/api/v1/apps/{guid}/executions"
@@ -233,17 +271,47 @@ def execution_data(guid, app):
     print(f"\nfor {app} - \n{executions}")
 
     execution_status = executions["apps"][0]["status"]
+    print(f"The execution status is -  {execution_status}")
+    if execution_status == "Failed":
+        print("***Execution Failed***")
+        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+        infra_client.switch_database(f'{db_store}')
+        chaos_details = [
+            {
+                "measurement": "MultiMTMS_Recurring_kill",
+                "tags": {
+                    "CFMicroservice": executions["MTMS"],
+                    "chaos_action": executions["kind"],
+                    "az": executions["selector"]["azs"][0],
+                    # "IndexValue": executions["apps"][0]["instance"],
+                    "IndexValue": "NA",
+                    "Execution_status": "Failed",
+                    # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                    "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                    "EndTime": "NA",
+                    "BuildDetails": BuildDetails,
+                    "IAAS": IAAS,
+                },
+                "fields": {
+                    "execution_data": str(executions),
+                    "chaos": 0  # we will need to figure out as to what we need to add here and use it better
+                }
+            }
+        ]
+        if infra_client.write_points(chaos_details, protocol='json'):
+            print("Chaos Data Insertion success")
+            pass
+        else:
+            print("Chaos Data Insertion Failed")
+            print(chaos_details)
+    else:
+        try:
+            instance_impacted = executions["apps"][0]["instance"]
+        except KeyError:
+            instance_impacted = "No_Instance_Available"
+            print("Instance not available in this zone to perform any chaos action")
 
-    instance_impacted = executions["apps"][0]["instance"]
-    instance_state(token, app, guid, instance_impacted)
-
-    if execution_status == "FINISHED" or execution_status == "RUNNING":
-        t1 = time.time()
-        time.sleep(4)
-
-        instance_status = instance_state(token, app, guid, instance_impacted)
-        while instance_status != "RUNNING":
-
+        if instance_impacted == "No_Instance_Available":
             infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
             infra_client.switch_database(f'{db_store}')
@@ -254,126 +322,125 @@ def execution_data(guid, app):
                         "CFMicroservice": executions["MTMS"],
                         "chaos_action": executions["kind"],
                         "az": executions["selector"]["azs"][0],
-                        "IndexValue": executions["apps"][0]["instance"],
-                        "Execution_status": executions["apps"][0]["status"],
-                        "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                        "BuildDetail": BuildDetail,
+                        # "IndexValue": executions["apps"][0]["instance"],
+                        "IndexValue": None,
+                        "Execution_status": FAILED,
+                        # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                        "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                        "EndTime": None,
+                        "BuildDetails": BuildDetails,
                         "IAAS": IAAS,
-                        # "Performed_By": Performed_By
+                        # "Performed_By": Performed_By,
+                        # "Persona":Persona
 
                     },
                     "fields": {
-                        # "execution_data": str(executions),
+                        "execution_data": str(executions),
                         "chaos": 1  # we will need to figure out as to what we need to add here and use it better
                     }
                 }
             ]
-            # print(chaos_details)
 
-            if infra_client.write_points(chaos_details, protocol='json'):
-                print("Chaos Data Insertion success")
+
+        else:
+            instance_state(token, app, guid, instance_impacted)
+
+            if execution_status == "Finished" or execution_status == "RUNNING" or execution_status == "Running":
+                t1 = time.time()
+                print(f"{t1}")
+                time.sleep(4)
                 instance_status = instance_state(token, app, guid, instance_impacted)
-            else:
-                print("Chaos Data Insertion Failed")
+                print(f"Instance status is - {instance_status}")
+                while instance_status != "RUNNING" and instance_status == "NA":
+                    instance_status = instance_state(token, app, guid, instance_impacted)
+                    time.sleep(1)
+
+                finish_time = datetime.utcnow()
+                print(f"The finish time is - {finish_time}")
+                # converted_finish_time = time.strftime("%H:%M:%S", finish_time)
+                converted_finish_time = finish_time.strftime("%Y-%m-%d %H:%M:%S")
+                print(f"The uptime is {converted_finish_time}")
+
+                infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+                infra_client.switch_database(f'{db_store}')
+                chaos_details = [
+                    {
+                        "measurement": "MultiMTMS_Recurring_kill",
+                        "tags": {
+                            "CFMicroservice": executions["MTMS"],
+                            "chaos_action": executions["kind"],
+                            "az": executions["selector"]["azs"][0],
+                            # "IndexValue": executions["apps"][0]["instance"],
+                            "IndexValue": instance_impacted,
+                            "Execution_status": executions["apps"][0]["status"],
+                            # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                            "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                            "EndTime": converted_finish_time,
+                            "BuildDetails": BuildDetails,
+                            "IAAS": IAAS,
+                            # "Performed_By": Performed_By,
+                            # "Persona":Persona
+
+                        },
+                        "fields": {
+                            "execution_data": str(executions),
+                            "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                        }
+                    }
+                ]
+
                 print(chaos_details)
-                instance_status = instance_state(token, app, guid, instance_impacted)
 
-        print("Instance is RUNNING")
-        finish_time = time.localtime()
-        converted_finish_time = time.strftime("%H:%M:%S", finish_time)
-        print(f"The uptime is {converted_finish_time}")
-        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+                if infra_client.write_points(chaos_details, protocol='json'):
+                    print("Chaos Data Insertion success")
+                    pass
+                else:
+                    print("Chaos Data Insertion Failed")
+                    print(chaos_details)
 
-        infra_client.switch_database(f'{db_store}')
-        chaos_details = [
-            {
-                "measurement": "MultiMTMS_Recurring_kill",
-                "tags": {
-                    "CFMicroservice": executions["MTMS"],
-                    "chaos_action": executions["kind"],
-                    "az": executions["selector"]["azs"][0],
-                    "IndexValue": executions["apps"][0]["instance"],
-                    "Execution_status": executions["apps"][0]["status"],
-                    "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                    "EndTime": converted_finish_time,
-                    "BuildDetail": BuildDetail,
-                    "IAAS": IAAS,
-                    # "Performed_By": Performed_By
+                t2 = time.time()
+                RTO = t2 - t1
+                print(f"RTO time - {RTO}")
+            else:
+                print("Execution failed")
+                infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
-                },
-                "fields": {
-                    "execution_data": str(executions),
-                    "chaos": 1  # we will need to figure out as to what we need to add here and use it better
-                }
-            }
-        ]
+                infra_client.switch_database(f'{db_store}')
+                chaos_details = [
+                    {
+                        "measurement": "MultiMTMS_Recurring_kill",
+                        "tags": {
+                            "CFMicroservice": executions["MTMS"],
+                            "chaos_action": executions["kind"],
+                            "az": executions["selector"]["azs"][0],
+                            # "IndexValue": executions["apps"][0]["instance"],
+                            "IndexValue": instance_impacted,
+                            "Execution_status": executions["apps"][0]["status"],
+                            # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
+                            "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
+                            "BuildDetails": BuildDetails,
+                            "IAAS": IAAS,
+                            # "Performed_By": Performed_By,
+                            # "Persona":Persona
 
-        if infra_client.write_points(chaos_details, protocol='json'):
-            print("Chaos Data Insertion success")
-            pass
-        else:
-            print("Chaos Data Insertion Failed")
-            print(chaos_details)
+                        },
+                        "fields": {
+                            "execution_data": str(executions),
+                            "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                        }
+                    }
+                ]
+                # print(chaos_details)
 
-        t2 = time.time()
-        RTO = t2 - t1
-        print(f"RTO time - {RTO}")
-    else:
-        print("Execution failed")
-        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+                if infra_client.write_points(chaos_details, protocol='json'):
+                    print("Chaos Data Insertion success")
+                    pass
+                else:
+                    print("Chaos Data Insertion Failed")
+                    print(chaos_details)
 
-        infra_client.switch_database(f'{db_store}')
-        chaos_details = [
-            {
-                "measurement": "MultiMTMS_Recurring_kill",
-                "tags": {
-                    "CFMicroservice": executions["MTMS"],
-                    "chaos_action": executions["kind"],
-                    "az": executions["selector"]["azs"][0],
-                    "IndexValue": executions["apps"][0]["instance"],
-                    "Execution_status": executions["apps"][0]["status"],
-                    "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                    "BuildDetail": BuildDetail,
-                    "IAAS": IAAS,
-                    # "Performed_By": Performed_By
-
-                },
-                "fields": {
-                    "execution_data": str(executions),
-                    "chaos": 1  # we will need to figure out as to what we need to add here and use it better
-                }
-            }
-        ]
-        # print(chaos_details)
-
-        if infra_client.write_points(chaos_details, protocol='json'):
-            print("Chaos Data Insertion success")
-            pass
-        else:
-            print("Chaos Data Insertion Failed")
-            print(chaos_details)
-
-    print("Instance is RUNNING")
-
-    # print(f"\n{executions}")
-    #
-    # try:
-    #     print(f"no - of executions for '{app} -'{len(executions)}'")
-    # except: pass
-    #
-    # return executions
-
-    # execution_status = response.json()[0]["apps"][0]["status"]
-
-    # print(execution_status)
-
-    # if execution_status == "FAILED":
-    #     print(f"No instance of {app} exists in {ZONE}")
-    #     print(f"The current mapping of instances are as below:\n{mapping()}")
-    #     return execution_status
-    # else:
-    #     time.sleep(360)
-    #     return execution_status
+            print("Instance is RUNNING")
 
 
 def delete_task(uuid, app):
@@ -413,6 +480,10 @@ def get_zone():
         app_dict["zones_of_" + app] = []  # https://stackoverflow.com/questions/23999801/creating-multiple-lists
         guid = get_app_guid(token, app)
 
+        # process_guid = get_process_guid(guid, app, token)
+        #
+        # print(f"this is process guid - {process_guid}")
+
         url = f"{chaos_url}/api/v1/apps/{guid}/mapping"
 
         payload = {}
@@ -423,13 +494,14 @@ def get_zone():
 
         response = requests.request("GET", url, headers=headers, data=payload)
 
-        # print(response.json())
+        print(response.json())
 
         # print(f"No. of instances - {len(response.json()['mapping'])}")
 
         app_z = response.json()
 
-        # print(app_z["mapping"]["0"]["name"])
+
+        print(app_z["mapping"]["0"]["name"])
 
         for zone in range(0, len(response.json()["mapping"])):
             i = str(zone)
@@ -446,21 +518,6 @@ def get_zone():
 
     print(app_dict)
 
-    # TODO - list all the apps availble in the zones
-
-    # for app in app_list:
-    #     if "z1" in app_dict["zones_of_" + app]:
-    #         z1.append(app)
-    #     else:
-    #         continue
-    #     if "z2" in app_dict["zones_of_" + app]:
-    #         z2.append(app)
-    #     else:
-    #         continue
-    #     if "z3" in app_dict["zones_of_" + app]:
-    #         z3.append(app)
-    #
-    # print(f"\n{z1}\n{z2}\n{z3}\n")
 
     for app in app_array:
         if "z1" in app_dict["zones_of_" + app]:
@@ -474,7 +531,7 @@ def get_zone():
 
     print(f"\nz1={z1}\nz2={z2}\nz3={z3}\n")
 
-    # # TODO - REMOVING DUPLICATES - https://stackoverflow.com/questions/7961363/removing-duplicates-in-lists
+    # # REMOVING DUPLICATES - https://stackoverflow.com/questions/7961363/removing-duplicates-in-lists
     #
     # print("The final list after removing the duplicates, if any is as below- \n")
     # print(f"z1 = {list(dict.fromkeys(z1))}")
@@ -486,7 +543,7 @@ def get_zone():
     # z2 = list(dict.fromkeys(z2))
     # z3 = list(dict.fromkeys(z3))
 
-    # TODO - Selecting the zone where all MTMS are present.
+    # Selecting the zone where all MTMS are present.
 
     if len(z1) == len(app_array):
         print("we will select 'z1' for chaos action")
@@ -554,7 +611,8 @@ def execution_details_plus_push_to_influx(app, guid, chaos_field):
     test_time = datetime.strptime(start_of_chaos_action, '%Y-%m-%dT%H:%M:%S')
     # print(test_time)
     # end_of_chaos_action = result["end_date"].split(".")[0]
-    end_of_chaos_action = str(test_time + timedelta(hours=5, minutes=30, seconds=DURATION))
+    # end_of_chaos_action = str(test_time + timedelta(hours=5, minutes=30, seconds=Chaos_Duration))
+    end_of_chaos_action = str(test_time + timedelta(seconds=Chaos_Duration))
     # print(end_of_chaos_action)
 
     chaos_details = [
@@ -565,16 +623,74 @@ def execution_details_plus_push_to_influx(app, guid, chaos_field):
                 "chaos_action": chaos_action_performed,
                 "az": az_impacted,
                 "IndexValue": instance_impacted,
-                "InstanceStartTime": utc_to_ist(start_of_chaos_action),
+                # "InstanceStartTime": utc_to_ist(start_of_chaos_action),
+                "InstanceStartTime": date_symmetry(start_of_chaos_action),
                 # "InstanceEndTime": utc_to_ist(end_of_chaos_action),
                 "InstanceEndTime": end_of_chaos_action,
-                "BuildDetail": BuildDetail,
+                "BuildDetails": BuildDetails,
                 "IAAS": IAAS,
-                # "Performed_By": Performed_By
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
 
             },
             "fields": {
-                "chaos": chaos_field  # we will need to figure out as to what we need to add here and use it better
+                "chaos": chaos_field,  # we will need to figure out as to what we need to add here and use it better
+                # "execution_status": str(result)
+            }
+        }
+    ]
+    # print(chaos_details)
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+        pass
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
+
+def execution_finish_push_to_influx(app, guid):
+
+    url = f"{chaos_url}/api/v1/apps/{guid}/executions"
+
+    payload = {}
+    headers = {
+        'Authorization': f"Basic {chaos_auth}"
+    }
+
+    response = requests.request("GET", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)[0]
+
+    print(json.dumps(result, indent=2))
+
+    # data = response.json()
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+    infra_client.switch_database(f'{db_store}')
+
+    chaos_action_performed = result["kind"]
+
+    Status = result["apps"][0]["status"]
+
+    print(f"The status is - {Status}")
+
+    # Status =
+
+    app_impacted = app
+
+
+    chaos_details = [
+        {
+            "measurement": "InstanceCrashDetails",
+            "tags": {
+                "CFMicroservice": app_impacted,
+                "chaos_action": chaos_action_performed,
+
+            },
+            "fields": {
+                # "chaos": chaos_field,  # we will need to figure out as to what we need to add here and use it better
+                "execution_status": str(result)
             }
         }
     ]
@@ -661,7 +777,7 @@ def app_scaling(CF_Microservice):
             subprocess.run(f'cf scale {CF_Microservice} -i 2')
             print(f"scale down of {CF_Microservice} is done")
 
-    time.sleep(DURATION)
+    time.sleep(Chaos_Duration)
 
     for CF_Microservice in app_list:
         subprocess.run(f'cf scale {CF_Microservice} -i 3')
@@ -676,7 +792,8 @@ def delay(CF_Microservice, guid, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
-        "app_name": CF_Microservice,
+        # "app_name": CF_Microservice,
+        "app_guid": guid,
         "selector": {
             "percentage": 50,
 
@@ -689,7 +806,7 @@ def delay(CF_Microservice, guid, ZONE):
             "latency": LATENCY
         },
         "repeatability": "ONCE",
-        "duration": DURATION
+        "duration": Chaos_Duration
     })
     headers = {
         'Content-Type': 'application/json',
@@ -710,16 +827,8 @@ def delay(CF_Microservice, guid, ZONE):
             "measurement": "Chaos_Creation",
             "tags": {
                 "CFMicroservice": CF_Microservice,
-                # "chaos_action": executions["kind"],
-                # "az": executions["selector"]["azs"][0],
-                # "IndexValue": executions["apps"][0]["instance"],
-                # "Execution_status": executions["apps"][0]["status"],
-                # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
-                # "EndTime": converted_finish_time,
-                # "BuildDetail": BuildDetail,
-                "IAAS": IAAS,
-                # "Performed_By": Performed_By
-
+                "BuildDetails": BuildDetails,
+                "IAAS": IAAS
             },
             "fields": {
                 "creation": str(result),
@@ -734,26 +843,117 @@ def delay(CF_Microservice, guid, ZONE):
         print("Chaos Data Insertion Failed")
         print(chaos_details)
 
-    # guid = get_app_guid(token, CF_Microservice)
-    #
-    # print(f"The guid for '{CF_Microservice}' is '{guid}'")
-    #
-    # time.sleep(DURATION + 90)
+    # Check if ther is no parallel execution happening on the same microservice
+    result_json = response.json()
+    try:
+        result_json["status"] == "Created"
+    except KeyError as e:
+        print(f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+    else: # If there is no parallel execution. we proceed further for with the executions
 
-    while no_of_execution != expected_executions:
-        # print("No other executions found")
-        no_of_execution = execution_len(guid)
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        # app_state(token, CF_Microservice, guid)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+
         time.sleep(5)
 
-    # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
-    # app_state(token, CF_Microservice, guid)
+        execution_finish_push_to_influx(CF_Microservice,guid)
 
-    start_time = time.time()
 
-    while time.time() < (start_time + DURATION):
-        begin_time = time.time()
-        execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+def ingress_delay(CF_Microservice, guid, ZONE):
 
+    no_of_execution = (execution_len(guid))
+    expected_executions = no_of_execution + 1
+
+    url = f"{chaos_url}/api/v1/tasks"
+
+    payload = json.dumps({
+        # "app_name": CF_Microservice,
+        "app_guid": guid,
+        "selector": {
+            "percentage": 50,
+
+            "azs": [
+                ZONE
+            ]
+        },
+        "kind": "MANIPULATE_INGRESS_NETWORK",
+        "config": {
+            "latency": LATENCY
+        },
+        "repeatability": "ONCE",
+        "duration": Chaos_Duration
+    })
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Basic {chaos_auth}"
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+
+    result = json.loads(response.text)
+
+    print(json.dumps(result, indent=4))
+
+    infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+    infra_client.switch_database(f'{db_store}')
+    chaos_details = [
+        {
+            "measurement": "Chaos_Creation",
+            "tags": {
+                "CFMicroservice": CF_Microservice,
+                "BuildDetails": BuildDetails,
+                "IAAS": IAAS
+            },
+            "fields": {
+                "creation": str(result),
+                # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+            }
+        }
+    ]
+
+    if infra_client.write_points(chaos_details, protocol='json'):
+        print("Chaos Data Insertion success")
+    else:
+        print("Chaos Data Insertion Failed")
+        print(chaos_details)
+
+    # Check if ther is no parallel execution happening on the same microservice
+    result_json = response.json()
+    try:
+        result_json["status"] == "Created"
+    except KeyError as e:
+        print(f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+    else: # If there is no parallel execution. we proceed further for with the executions
+
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        # app_state(token, CF_Microservice, guid)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+
+        time.sleep(5)
+
+        execution_finish_push_to_influx(CF_Microservice, guid)
 
 
 def loss(CF_Microservice, guid, ZONE):
@@ -764,7 +964,8 @@ def loss(CF_Microservice, guid, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
-        "app_name": CF_Microservice,
+        # "app_name": CF_Microservice,
+        "app_guid": guid,
         "selector": {
             "percentage": 50,
 
@@ -777,7 +978,7 @@ def loss(CF_Microservice, guid, ZONE):
             "percentage_loss": LOSS_PERCENTAGE
         },
         "repeatability": "ONCE",
-        "duration": DURATION
+        "duration": Chaos_Duration
     })
     headers = {
         'Content-Type': 'application/json',
@@ -804,9 +1005,10 @@ def loss(CF_Microservice, guid, ZONE):
                 # "Execution_status": executions["apps"][0]["status"],
                 # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                 # "EndTime": converted_finish_time,
-                # "BuildDetail": BuildDetail,
+                "BuildDetails": BuildDetails,
                 "IAAS": IAAS,
-                # "Performed_By": Performed_By
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
 
             },
             "fields": {
@@ -822,46 +1024,61 @@ def loss(CF_Microservice, guid, ZONE):
         print("Chaos Data Insertion Failed")
         print(chaos_details)
 
-    while no_of_execution != expected_executions:
-        # print("No other executions found")
-        no_of_execution = execution_len(guid)
+    # Check if ther is no parallel execution happening on the same microservice
+    result_json = response.json()
+    try:
+        result_json["status"] == "Created"
+    except KeyError as e:
+        print(f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+    else: # If there is no parallel execution. we proceed further for with the executions
+
+
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        # app_state(token, CF_Microservice, guid)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
+
         time.sleep(5)
 
-    # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
-    # app_state(token, CF_Microservice, guid)
-
-    start_time = time.time()
-
-    while time.time() < (start_time + DURATION):
-        begin_time = time.time()
-        execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
+        execution_finish_push_to_influx(CF_Microservice, guid)
 
 
-def recurring_kill(CF_Microservice, guid, ZONE):
-    # guid = get_app_guid(token, app)
-    # mapping(guid, app)
+def ingress_loss(CF_Microservice, guid, ZONE):
+
     no_of_execution = (execution_len(guid))
     expected_executions = no_of_execution + 1
 
-    # utc_time = datetime.utcnow()
-    # print(f"the utc time now is - {utc_time}")
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
-        "app_name": CF_Microservice,
+        # "app_name": CF_Microservice,
+        "app_guid": guid,
         "selector": {
             "percentage": 50,
+
             "azs": [
                 ZONE
             ]
         },
-        "cron": f"*/{recurring_every} * * * *",
-        "kind": "KILL",
-        "repeatability": "RECURRING"
+        "kind": "MANIPULATE_INGRESS_NETWORK",
+        "config": {
+            "percentage_loss": LOSS_PERCENTAGE
+        },
+        "repeatability": "ONCE",
+        "duration": Chaos_Duration
     })
     headers = {
-        'Authorization': f'Basic {chaos_auth}',
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': f"Basic {chaos_auth}"
     }
 
     response = requests.request("POST", url, headers=headers, data=payload)
@@ -869,12 +1086,6 @@ def recurring_kill(CF_Microservice, guid, ZONE):
     result = json.loads(response.text)
 
     print(json.dumps(result, indent=4))
-
-    uuid = response.json()["uuid"]
-
-    print(uuid)
-
-    uuid_list.append(uuid)
 
     infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
 
@@ -890,9 +1101,10 @@ def recurring_kill(CF_Microservice, guid, ZONE):
                 # "Execution_status": executions["apps"][0]["status"],
                 # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                 # "EndTime": converted_finish_time,
-                # "BuildDetail": BuildDetail,
+                "BuildDetails": BuildDetails,
                 "IAAS": IAAS,
-                # "Performed_By": Performed_By
+                # "Performed_By": Performed_By,
+                # "Persona": Persona
 
             },
             "fields": {
@@ -908,31 +1120,161 @@ def recurring_kill(CF_Microservice, guid, ZONE):
         print("Chaos Data Insertion Failed")
         print(chaos_details)
 
-    while no_of_execution != expected_executions:
-        # print("No other executions found")
-        no_of_execution = execution_len(guid)
+        # Check if ther is no parallel execution happening on the same microservice
+    result_json = response.json()
+    try:
+        result_json["status"] == "Created"
+    except KeyError as e:
+        print(
+            f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+    else:  # If there is no parallel execution. we proceed further for with the executions
+
+        while no_of_execution != expected_executions:
+            # print("No other executions found")
+            no_of_execution = execution_len(guid)
+            time.sleep(5)
+
+        # execution_details_plus_push_to_influx(CF_Microservice, guid, LATENCY)
+        # app_state(token, CF_Microservice, guid)
+
+        start_time = time.time()
+
+        while time.time() < (start_time + Chaos_Duration):
+            begin_time = time.time()
+            execution_details_plus_push_to_influx(CF_Microservice, guid, LOSS_PERCENTAGE)
+
         time.sleep(5)
 
-    start_time = time.time()
+        execution_finish_push_to_influx(CF_Microservice, guid)
 
-    while time.time() < (start_time + DURATION):
-        begin_time = time.time()
-        execution_data(guid, CF_Microservice)
-        end_time = time.time()
-        total_exec_time = end_time - begin_time
-        print(f"Total Execution time is - {total_exec_time}")
-        # print("App state - IMMEDIATELY post execution -")
-        # app_state(token, CF_Microservice, guid)
-        # time.sleep(sleep_time)
-        # print(f"App state {sleep_time}sec post execution -")
-        # app_state(token, CF_Microservice, guid)
-        time.sleep(((recurring_every * 60) + 2) - total_exec_time)
-        # mapping(guid, CF_Microservice)
 
-    delete_task(uuid, CF_Microservice)
+def recurring_kill(CF_Microservice, guid, ZONE):
+    # guid = get_app_guid(token, app)
+    # mapping(guid, app)
+    try:
+        no_of_execution = (execution_len(guid))
+        expected_executions = no_of_execution + 1
 
-    print("The final mapping of all the instances are are below - \n")
-    mapping(guid, CF_Microservice)
+        # utc_time = datetime.utcnow()
+        # print(f"the utc time now is - {utc_time}")
+        url = f"{chaos_url}/api/v1/tasks"
+
+        payload = json.dumps({
+            # "app_name": CF_Microservice,
+            "app_guid": guid,
+            "selector": {
+                "percentage": 50,
+                "azs": [
+                    ZONE
+                ]
+            },
+            "cron": f"*/{recurring_every} * * * *",
+            "kind": "KILL",
+            "repeatability": "RECURRING"
+        })
+        headers = {
+            'Authorization': f'Basic {chaos_auth}',
+            'Content-Type': 'application/json'
+        }
+        try:
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            result = json.loads(response.text)
+
+            print(json.dumps(result, indent=4))
+        except json.JSONDecodeError:
+            print("Empty response to try again")
+            time.sleep(2)
+            try:
+                result = json.loads(response.text)
+
+                print(json.dumps(result, indent=4))
+            except json.JSONDecodeError as e:
+                return f"{e} - API is not retuening proper response"
+
+
+        try:
+            uuid = response.json()["uuid"]
+        except KeyError as e:
+            print(e)
+            print("sleep for 2 seconds and try again")
+            try:
+                uuid = response.json()["uuid"]
+            except KeyError as e :
+                print(f"{e} - task might not be getting created please check in the dashboard or API")
+                return 0
+
+        print(uuid)
+
+        uuid_list.append(uuid)
+
+        infra_client = InfluxDBClient(f'{influx_db}', 8086, f'{db_store}')
+
+        infra_client.switch_database(f'{db_store}')
+        chaos_details = [
+            {
+                "measurement": "Chaos_Creation",
+                "tags": {
+                    "CFMicroservice": CF_Microservice,
+                    "BuildDetails": BuildDetails,
+                    "IAAS": IAAS
+                },
+                "fields": {
+                    "creation": str(result),
+                    # "chaos": 1  # we will need to figure out as to what we need to add here and use it better
+                }
+            }
+        ]
+
+        if infra_client.write_points(chaos_details, protocol='json'):
+            print("Chaos Data Insertion success")
+        else:
+            print("Chaos Data Insertion Failed")
+            print(chaos_details)
+
+            # Check if ther is no parallel execution happening on the same microservice
+        result_json = response.json()
+        try:
+            result_json["status"] == "Created"
+        except KeyError as e:
+            print(
+                f"*ERROR*: Unable to get the {e} of '{CF_Microservice}' - {result_json}\nPlease check the chaos tool dashboard to verify or with executions api for this app")
+        else:  # If there is no parallel execution. we proceed further for with the executions
+
+            while no_of_execution != expected_executions:
+                # print("No other executions found")
+                no_of_execution = execution_len(guid)
+                time.sleep(5)
+
+            start_time = time.time()
+
+            while time.time() < (start_time + Chaos_Duration):
+                begin_time = time.time()
+                execution_data(guid, CF_Microservice)
+                end_time = time.time()
+                total_exec_time = end_time - begin_time
+                print(f"Total Execution time is - {total_exec_time}")
+                # print("App state - IMMEDIATELY post execution -")
+                # app_state(token, CF_Microservice, guid)
+                # time.sleep(sleep_time)
+                # print(f"App state {sleep_time}sec post execution -")
+                # app_state(token, CF_Microservice, guid)
+                time.sleep(((recurring_every * 60) + 2) - total_exec_time)
+                # mapping(guid, CF_Microservice)
+
+            time.sleep(5)
+
+            execution_finish_push_to_influx(CF_Microservice, guid)
+
+    finally:
+        try:
+            delete_task(uuid, CF_Microservice)
+        except:
+            pass # We need to get the task info here automatically if it has failed
+        finally:
+            time.sleep(20)
+            print("The final mapping of all the instances are as below - \n")
+            mapping(guid, CF_Microservice)
 
 
 if __name__ == '__main__':
@@ -940,7 +1282,7 @@ if __name__ == '__main__':
     config = read_config()
 
     if tenant_name == "":
-        print("No Tenant selected for chaos action")
+        print("No Tenant selected for chaos action.chaos action wil be performed only on MTMS")
         app_array = app_list  # when no worker is selected, only MTMS should be executed
         print(app_array)
     else:
@@ -961,111 +1303,166 @@ if __name__ == '__main__':
         app_array = app_list + worker_list
     except:
         app_array = worker_list  # when there are no MTMS entered only worker list needs to be taken and executed
-
+    if len(app_array) == 0:
+        print("ERROR: You have not passed any application to perform a chaos action on.")
     # time.sleep(60)
     # time.sleep(WAIT_TIME)
-    ZONE = get_zone()
-
-    t1 = time.time()
-
-    if Chaos_Action == "DELAY":
-        p1 = mp.Pool()
-        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                 app_array))
-        print(guid_list)
-        p1.close()
-        p1.join()
-
-        time.sleep(WAIT_TIME)
-
-        m = mp.Manager()
-        memorizedPaths = m.dict()
-        filepaths = m.dict()
-        cutoff = 1  ##
-        # use all available CPUs
-        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                       filepaths,
-                                                       cutoff))
-        degreelist = range(1)  ##
-        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            result = p.starmap(delay, zip(app_array, guid_list, repeat(ZONE)))
-        p.close()
-        p.join()
-
-    elif Chaos_Action == "KILL":
-        time.sleep(WAIT_TIME)
-        p = mp.Pool()
-        result = p.starmap(crash, zip(app_array, repeat(ZONE)))
-        p.close()
-        p.join()
-    elif Chaos_Action == "SCALE":
-        time.sleep(WAIT_TIME)
-        p = mp.Pool()
-        result = p.map(app_scaling, app_array)
-        p.close()
-        p.join()
-
-    elif Chaos_Action == "LOSS":
-        p1 = mp.Pool()
-        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                 app_array))
-        print(guid_list)
-        p1.close()
-        p1.join()
-
-        time.sleep(WAIT_TIME)
-
-        m = mp.Manager()
-        memorizedPaths = m.dict()
-        filepaths = m.dict()
-        cutoff = 1  ##
-        # use all available CPUs
-        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                       filepaths,
-                                                       cutoff))
-        degreelist = range(1)  ##
-        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            result = p.starmap(loss, zip(app_array, guid_list, repeat(ZONE)))
-        p.close()
-        p.join()
+    else:
+        try:
+            ZONE = get_zone()
+        except:
+            print("unable to fetch proper zone due to GUID related issues. reach out to infra for rootcause")
 
 
-    elif Chaos_Action == "RECURRING_KILL":
-        p1 = mp.Pool()
-        guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                 app_array))  # https://stackoverflow.com/questions/5442910/how-to-use-multiprocessing-pool-map-with-multiple-arguments
-        print(guid_list)
-        p1.close()
-        p1.join()
+        t1 = time.time()
 
-        # p2 = Pool()
-        # mapping_pool = p2.starmap(mapping, zip(guid_list, app_array))
-        # p2.close()
-        # p2.join()
-        #
-        # p3 = Pool()
-        # app_state_pool = p3.starmap(app_state, zip(repeat(token), app_array, guid_list))
-        # p3.close()
-        # p3.join()
+        if Chaos_Action == "DELAY":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))
+            print(guid_list)
+            p1.close()
+            p1.join()
 
-        # ZONE = get_zone()
+            time.sleep(WAIT_TIME)
 
-        # p4 = Pool()
-        # result = p4.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
-        # p4.close()
-        # p4.join()
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(delay, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError as e:
+                    print(e)
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
 
-        m = mp.Manager()
-        memorizedPaths = m.dict()
-        filepaths = m.dict()
-        cutoff = 1  ##
-        # use all available CPUs
-        p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                       filepaths,
-                                                       cutoff))
-        degreelist = range(1)  ##
-        for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-            result = p.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
-        p.close()
-        p.join()
+        elif Chaos_Action == "KILL":
+            time.sleep(WAIT_TIME)
+            p = Pool()
+            result = p.starmap(crash, zip(app_array, repeat(ZONE)))
+            p.close()
+            p.join()
+        elif Chaos_Action == "SCALE":
+            time.sleep(WAIT_TIME)
+            p = Pool()
+            result = p.map(app_scaling, app_array)
+            p.close()
+            p.join()
 
+        elif Chaos_Action == "LOSS":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))
+            print(guid_list)
+            p1.close()
+            p1.join()
+
+            time.sleep(WAIT_TIME)
+
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(loss, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError as e:
+                    print(e)
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
+
+        elif Chaos_Action == "INGRESS_LOSS":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))
+            print(guid_list)
+            p1.close()
+            p1.join()
+
+            time.sleep(WAIT_TIME)
+
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(ingress_loss, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError :
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
+
+        elif Chaos_Action == "INGRESS_DELAY":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))
+            print(guid_list)
+            p1.close()
+            p1.join()
+
+            time.sleep(WAIT_TIME)
+
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(ingress_delay, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError as e:
+                    print(e)
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
+
+
+        elif Chaos_Action == "RECURRING_KILL":
+            p1 = mp.Pool()
+            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
+                                                     app_array))  # https://stackoverflow.com/questions/5442910/how-to-use-multiprocessing-pool-map-with-multiple-arguments
+            print(guid_list)
+            p1.close()
+            p1.join()
+
+            m = mp.Manager()
+            memorizedPaths = m.dict()
+            filepaths = m.dict()
+            cutoff = 1  ##
+            # use all available CPUs
+            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
+                                                           filepaths,
+                                                           cutoff))
+            degreelist = range(1)  ##
+            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
+                try:
+                    result = p.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
+                except NameError as e:
+                    print(e)
+                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
+            p.close()
+            p.join()
