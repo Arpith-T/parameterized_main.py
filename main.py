@@ -49,6 +49,7 @@ IAAS = "AZURE"
 # Persona = "design"
 WAIT_TIME = 0
 
+print("test")
 
 worker_list = []
 uuid_list = []
