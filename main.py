@@ -29,13 +29,13 @@ from itertools import repeat
 # WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
 LATENCY = 1000
-Chaos_Duration = 60
+Chaos_Duration = 30
 LOSS_PERCENTAGE = 25
 recurring_every = 4
-app_list = ["it-op-jobs"]
+app_list = ["it-km-rest"]
 # Chaos_Action = "LOSS"
-# Chaos_Action = "DELAY"
-Chaos_Action = "RECURRING_KILL"
+Chaos_Action = "DELAY"
+# Chaos_Action = "RECURRING_KILL"
 # Chaos_Action = "INGRESS_DELAY"
 # Chaos_Action = "INGRESS_LOSS"
 # Chaos_Action = "KILL"
@@ -44,7 +44,7 @@ PASSWORD = "Prisminfra529#5"
 tenant_name = ""
 # tenant_name = "awsiatmaz-02"
 BuildDetails = "test"
-IAAS = "AWS"
+IAAS = "AZURE"
 # Performed_By = "Ather"
 # Persona = "design"
 WAIT_TIME = 0
@@ -56,23 +56,7 @@ list_of_executions = []
 list_of_guids = []
 list_of_process_guids = [] # to get the process/instance state - this will handle it-rootwebapp exception
 
-### multiprocessing with all the cores #####
-# Refer - https://stackoverflow.com/questions/19086106/how-to-utilize-all-cores-with-python-multiprocessing
-def init_worker(mps, fps, cut):
-    global memorizedPaths, filepaths, cutoff
-    global DG
 
-    print("process initializing", mp.current_process())
-    memorizedPaths, filepaths, cutoff = mps, fps, cut
-    DG = 1##nx.read_gml("KeggComplete.gml", relabel = True)
-
-def work(item):
-    _all_simple_paths_graph(DG, cutoff, item, memorizedPaths, filepaths)
-
-def _all_simple_paths_graph(DG, cutoff, item, memorizedPaths, filepaths):
-    pass # print "doing " + str(item)
-
-################################
 
 def read_config():
     with open('config.json') as f:
@@ -345,7 +329,7 @@ def execution_data(guid, app):
                         "az": executions["selector"]["azs"][0],
                         # "IndexValue": executions["apps"][0]["instance"],
                         "IndexValue": None,
-                        "Execution_status": "FAILED",
+                        "Execution_status": FAILED,
                         # "InstanceStartTime": utc_to_ist(executions["start_date"].split(".")[0]),
                         "InstanceStartTime": date_symmetry(executions["start_date"].split(".")[0]),
                         "EndTime": None,
@@ -748,11 +732,11 @@ def app_state(token, app, guid):
             f"Instance - {response.json()['resources'][i]['index']} of {app} is {response.json()['resources'][i]['state']}")
 
 
-def crash(CF_Microservice, ZONE, guid):
+def crash(CF_Microservice, ZONE):
     url = f"{chaos_url}/api/v1/tasks"
 
     payload = json.dumps({
-        "app_guid": guid,
+        "app_name": CF_Microservice,
         "selector": {
             "percentage": 50,
             "azs": [
@@ -1197,18 +1181,28 @@ def recurring_kill(CF_Microservice, guid, ZONE):
             'Authorization': f'Basic {chaos_auth}',
             'Content-Type': 'application/json'
         }
+        try:
+            response = requests.request("POST", url, headers=headers, data=payload)
 
-        response = requests.request("POST", url, headers=headers, data=payload)
+            result = json.loads(response.text)
 
-        result = json.loads(response.text)
+            print(json.dumps(result, indent=4))
+        except json.JSONDecodeError:
+            print("Empty response to try again")
+            time.sleep(2)
+            try:
+                result = json.loads(response.text)
 
-        print(json.dumps(result, indent=4))
+                print(json.dumps(result, indent=4))
+            except json.JSONDecodeError as e:
+                return f"{e} - API is not retuening proper response"
+
 
         try:
             uuid = response.json()["uuid"]
         except KeyError as e:
             print(e)
-            print("sllep for 2 seconds and try again")
+            print("sleep for 2 seconds and try again")
             try:
                 uuid = response.json()["uuid"]
             except KeyError as e :
@@ -1255,7 +1249,7 @@ def recurring_kill(CF_Microservice, guid, ZONE):
             while no_of_execution != expected_executions:
                 # print("No other executions found")
                 no_of_execution = execution_len(guid)
-                time.sleep(2)
+                time.sleep(5)
 
             start_time = time.time()
 
@@ -1288,193 +1282,47 @@ def recurring_kill(CF_Microservice, guid, ZONE):
             mapping(guid, CF_Microservice)
 
 
-if __name__ == '__main__':
+config = read_config()
 
-    config = read_config()
-
-    if tenant_name == "":
-        print("No Tenant selected for chaos action.chaos action wil be performed only on MTMS")
-        app_array = app_list  # when no worker is selected, only MTMS should be executed
-        print(app_array)
-    else:
-        try:
-            worker = worker_name()
-
-            worker_list.append(worker)
-
-            print(worker_list)
-
-            app_array = app_list + worker_list
-
-            print(app_array)
-        except:
-            print("No worker selected")
-            pass
+if tenant_name == "":
+    print("No Tenant selected for chaos action.chaos action wil be performed only on MTMS")
+    app_array = app_list  # when no worker is selected, only MTMS should be executed
+    print(app_array)
+else:
     try:
+        worker = worker_name()
+
+        worker_list.append(worker)
+
+        print(worker_list)
+
         app_array = app_list + worker_list
+
+        print(app_array)
     except:
-        app_array = worker_list  # when there are no MTMS entered only worker list needs to be taken and executed
-    if len(app_array) == 0:
-        print("ERROR: You have not passed any application to perform a chaos action on.")
-    # time.sleep(60)
-    # time.sleep(WAIT_TIME)
-    else:
-        try:
-            ZONE = get_zone()
-        except:
-            print("unable to fetch proper zone due to GUID related issues. reach out to infra for rootcause")
+        print("No worker selected")
+        pass
+try:
+    app_array = app_list + worker_list
+except:
+    app_array = worker_list  # when there are no MTMS entered only worker list needs to be taken and executed
+if len(app_array) == 0:
+    print("ERROR: You have not passed any application to perform a chaos action on.")
+# time.sleep(60)
+# time.sleep(WAIT_TIME)
+else:
+    try:
+        ZONE = get_zone()
+    except:
+        print("unable to fetch proper zone due to GUID related issues. reach out to infra for rootcause")
 
+print(f"The number of pods that needs to be created is: {len(app_array)}\n")
 
-        t1 = time.time()
+print("The below should run sepearately on each pod\n")
 
-        if Chaos_Action == "DELAY":
-            p1 = mp.Pool()
-            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                     app_array))
-            print(guid_list)
-            p1.close()
-            p1.join()
+if Chaos_Action == "DELAY":
+    for app in app_array:
+        guid = get_app_guid(token,app)
+        delay(app, guid, ZONE)
 
-            time.sleep(WAIT_TIME)
-
-            m = mp.Manager()
-            memorizedPaths = m.dict()
-            filepaths = m.dict()
-            cutoff = 1  ##
-            # use all available CPUs
-            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                           filepaths,
-                                                           cutoff))
-            degreelist = range(1)  ##
-            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-                try:
-                    result = p.starmap(delay, zip(app_array, guid_list, repeat(ZONE)))
-                except NameError as e:
-                    print(e)
-                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-            p.close()
-            p.join()
-
-        elif Chaos_Action == "KILL":
-            time.sleep(WAIT_TIME)
-            p = mp.Pool()
-            result = p.starmap(crash, zip(app_array, repeat(ZONE)))
-            p.close()
-            p.join()
-        elif Chaos_Action == "SCALE":
-            time.sleep(WAIT_TIME)
-            p = mp.Pool()
-            result = p.map(app_scaling, app_array)
-            p.close()
-            p.join()
-
-        elif Chaos_Action == "LOSS":
-            p1 = mp.Pool()
-            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                     app_array))
-            print(guid_list)
-            p1.close()
-            p1.join()
-
-            time.sleep(WAIT_TIME)
-
-            m = mp.Manager()
-            memorizedPaths = m.dict()
-            filepaths = m.dict()
-            cutoff = 1  ##
-            # use all available CPUs
-            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                           filepaths,
-                                                           cutoff))
-            degreelist = range(1)  ##
-            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-                try:
-                    result = p.starmap(loss, zip(app_array, guid_list, repeat(ZONE)))
-                except NameError as e:
-                    print(e)
-                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-            p.close()
-            p.join()
-
-        elif Chaos_Action == "INGRESS_LOSS":
-            p1 = mp.Pool()
-            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                     app_array))
-            print(guid_list)
-            p1.close()
-            p1.join()
-
-            time.sleep(WAIT_TIME)
-
-            m = mp.Manager()
-            memorizedPaths = m.dict()
-            filepaths = m.dict()
-            cutoff = 1  ##
-            # use all available CPUs
-            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                           filepaths,
-                                                           cutoff))
-            degreelist = range(1)  ##
-            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-                try:
-                    result = p.starmap(ingress_loss, zip(app_array, guid_list, repeat(ZONE)))
-                except NameError :
-                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-            p.close()
-            p.join()
-
-        elif Chaos_Action == "INGRESS_DELAY":
-            p1 = mp.Pool()
-            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                     app_array))
-            print(guid_list)
-            p1.close()
-            p1.join()
-
-            time.sleep(WAIT_TIME)
-
-            m = mp.Manager()
-            memorizedPaths = m.dict()
-            filepaths = m.dict()
-            cutoff = 1  ##
-            # use all available CPUs
-            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                           filepaths,
-                                                           cutoff))
-            degreelist = range(1)  ##
-            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-                try:
-                    result = p.starmap(ingress_delay, zip(app_array, guid_list, repeat(ZONE)))
-                except NameError as e:
-                    print(e)
-                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-            p.close()
-            p.join()
-
-
-        elif Chaos_Action == "RECURRING_KILL":
-            p1 = mp.Pool()
-            guid_list = p1.starmap(get_app_guid, zip(repeat(token),
-                                                     app_array))  # https://stackoverflow.com/questions/5442910/how-to-use-multiprocessing-pool-map-with-multiple-arguments
-            print(guid_list)
-            p1.close()
-            p1.join()
-
-            m = mp.Manager()
-            memorizedPaths = m.dict()
-            filepaths = m.dict()
-            cutoff = 1  ##
-            # use all available CPUs
-            p = mp.Pool(initializer=init_worker, initargs=(memorizedPaths,
-                                                           filepaths,
-                                                           cutoff))
-            degreelist = range(1)  ##
-            for _ in p.imap_unordered(work, degreelist, chunksize=5000):
-                try:
-                    result = p.starmap(recurring_kill, zip(app_array, guid_list, repeat(ZONE)))
-                except NameError as e:
-                    print(e)
-                    print("unable to fetch the correct zone check if we are able to get the GUID of the app")
-            p.close()
-            p.join()
 
