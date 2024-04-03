@@ -1,5 +1,3 @@
-# In multimtms_v23 changes to the mapping were made ny the chaos team. this is adopted accordingly in the get_zone funtion - azs = response.json()["app_mapping"][zone]["zoneName"]
-
 import os
 import requests
 import json
@@ -13,23 +11,44 @@ from dateutil import parser
 from datetime import datetime, timedelta
 from itertools import repeat
 
-IAAS = os.getenv("IAAS")
-LATENCY = int(os.getenv("LATENCY"))
-LOSS_PERCENTAGE = int(os.getenv("LOSS_PERCENTAGE"))
-Chaos_Duration = int(os.getenv("Chaos_Duration"))
-recurring_every = int(os.getenv("recurring_every"))
-app_string = os.getenv("CF_Microservice")
-try:
-    app_list = app_string.split(',')
-except:
-    pass
+# IAAS = os.getenv("IAAS")
+# LATENCY = int(os.getenv("LATENCY"))
+# LOSS_PERCENTAGE = int(os.getenv("LOSS_PERCENTAGE"))
+# Chaos_Duration = int(os.getenv("Chaos_Duration"))
+# recurring_every = int(os.getenv("recurring_every"))
+# app_string = os.getenv("CF_Microservice")
+# try:.
+#     app_list = app_string.split(',')
+# except:
+#     pass
+#
+# Chaos_Action = os.getenv("Chaos_Action")
+# PASSWORD = os.getenv("PASSWORD")
+# tenant_name = os.getenv("TENANT")
+# BuildDetails = os.getenv("BuildReport")
+# WAIT_TIME = int(os.getenv("WAIT_TIME"))
 
-Chaos_Action = os.getenv("Chaos_Action")
-PASSWORD = os.getenv("PASSWORD")
-tenant_name = os.getenv("TENANT")
-BuildDetails = os.getenv("BuildReport")
-WAIT_TIME = int(os.getenv("WAIT_TIME"))
+LATENCY = 1000
+Chaos_Duration = 30
+LOSS_PERCENTAGE = 25
+recurring_every = 4
+app_list = ["it-co","it-op-rest"]
+Chaos_Action = "LOSS"
+# Chaos_Action = "DELAY"
+# Chaos_Action = "RECURRING_KILL"
+# Chaos_Action = "INGRESS_DELAY"
+# Chaos_Action = "INGRESS_LOSS"
+# Chaos_Action = "KILL"
+# Chaos_Action = "SCALE"
 
+tenant_name = ""
+# tenant_name = "awsiatmaz-02"
+BuildDetails = "test"
+IAAS = "ziat003"
+# Performed_By = "Ather"
+# Persona = "design"
+WAIT_TIME = 0
+PASSWORD = ""
 
 
 worker_list = []
@@ -75,6 +94,7 @@ trm_oauth_url = json.dumps(config[IAAS]['trm_oauth_url']).strip('\"')
 trm_basic_auth = json.dumps(config[IAAS]['trm_basic_auth']).strip('\"')
 influx_db = json.dumps(config[IAAS]['influx_db']).strip('\"')
 db_store = json.dumps(config[IAAS]['db_store']).strip('\"')
+
 
 def trm_token():
     url = f"{trm_oauth_url}?grant_type=client_credentials"
@@ -301,7 +321,7 @@ def execution_data(guid, app):
             }
         ]
         if infra_client.write_points(chaos_details, protocol='json'):
-            print("Chaos Data Insertion success")
+            print("Chaos Data Insertion success", flush=True)
             pass
         else:
             print("Chaos Data Insertion Failed")
@@ -498,15 +518,22 @@ def get_zone():
 
         print(response.json())
 
-        # print(f"No. of instances - {len(response.json()['mapping'])}")
+        print(f"No. of instances - {len(response.json()['app_mapping'])}")
 
         app_z = response.json()
 
-        for zone in range(0, len(response.json()["app_mapping"])):
+        print(type(app_z))
 
-            # print(response.json()["app_mapping"][zone]["name"])
+        print(len(app_z["app_mapping"]))
 
-            azs = response.json()["app_mapping"][zone]["zoneName"]
+        for zone in range(0, len(app_z["app_mapping"])):
+            # i = f'Instance_{zone}'
+            print("zone is - ", zone)
+            print(f'zone details are - {app_z["app_mapping"][zone]}')
+
+            print(f'zone name is - {app_z["app_mapping"][zone]["zoneName"]}')
+
+            azs = app_z["app_mapping"][zone]["zoneName"]
 
             # app_zones.append(azs)
 
@@ -1231,7 +1258,7 @@ def recurring_kill(CF_Microservice, guid, ZONE):
         ]
 
         if infra_client.write_points(chaos_details, protocol='json'):
-            print("Chaos Data Insertion success", flush=True)
+            print("Chaos Data Insertion success")
         else:
             print("Chaos Data Insertion Failed")
             print(chaos_details)
@@ -1314,7 +1341,8 @@ if __name__ == '__main__':
     else:
         try:
             ZONE = get_zone()
-        except:
+        except NameError as e:
+            print(e)
             print("unable to fetch proper zone due to GUID related issues. reach out to infra for rootcause")
 
 
